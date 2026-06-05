@@ -1,0 +1,46 @@
+# SceneScout Feed Configuration
+#
+# Each feed entry defines an RSS source and its metadata.
+# source_quality_score: 0.0–1.0. Higher = more reliable event data.
+# active: Set to false to disable without deleting the entry.
+
+feeds:
+  - id: la_weekly_events
+    name: LA Weekly Events
+    url: https://www.laweekly.com/tag/events/feed/
+    city: Los Angeles
+    source_quality_score: 0.75
+    active: true
+    notes: "General LA events coverage. Mix of editorial and listings."
+
+  - id: the_shed_dtla
+    name: The Broad Museum Events
+    url: https://www.thebroad.org/rss.xml
+    city: Los Angeles
+    source_quality_score: 0.85
+    active: true
+    notes: "Museum events. Well-structured entries."
+
+  - id: dublab
+    name: dublab
+    url: https://dublab.com/feed/
+    city: Los Angeles
+    source_quality_score: 0.80
+    active: true
+    notes: "Independent LA radio. Experimental music events and streams."
+
+  - id: kcrw_events
+    name: KCRW Events
+    url: https://www.kcrw.com/music/shows/feed.xml
+    city: Los Angeles
+    source_quality_score: 0.80
+    active: true
+    notes: "KCRW public radio events. Reliable structure."
+
+  - id: kcet_arts
+    name: KCET Arts & Culture
+    url: https://www.kcet.org/shows/artbound/feed
+    city: Los Angeles
+    source_quality_score: 0.70
+    active: true
+    notes: "LA arts coverage. Not always event-specific."

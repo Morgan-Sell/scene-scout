@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "scene-scout"
+version = "0.1.0"
+description = "A personalized event discovery agent"
+requires-python = ">=3.11"
+dependencies = [
+    "feedparser>=6.0",       # RSS/Atom parsing — deterministic, spec-compliant
+    "pydantic>=2.0",         # Schema definition and validation
+    "pyyaml>=6.0",           # Feed config file parsing
+    "httpx>=0.27",           # HTTP client for feed fetching (async-capable)
+    "python-dotenv>=1.0",    # Environment variable loading
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",           # HTTP mocking for tests
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scene_scout*"]
