@@ -1,0 +1,78 @@
+%%{init: {'theme': 'dark'}}%%
+flowchart TD
+    subgraph INFRA["Infrastructure"]
+        MODAL["Modal Scheduler"]
+        GRADIO["Gradio UI\n(Modal Web Endpoint)"]
+    end
+
+    subgraph PIPELINE["Pipeline Container — scene-scout-pipeline"]
+        subgraph PHASE1["Phase 1: Ingest & Normalize"]
+            FS["Feed Scout\n(async)"]
+            EX["Event Extraction\n(Claude API)"]
+            NO["Event Normalization"]
+            DD["Deduplication"]
+            DQ["Description Quality\n(rubric)"]
+            FI["Pre-Enrichment Filter"]
+        end
+
+        subgraph BATCH["Batch Enrichment — Claude Batch API"]
+            TS["Talent Scout"]
+            VC["Vibe Classifier"]
+            NS["Neighborhood Scout"]
+        end
+
+        subgraph PHASE2["Phase 2: Rank & Send"]
+            RK["Ranking Agent\n(scoring + Chroma)"]
+            SO["Sell-Out Risk"]
+            CU["Recommendation Curator\n(Margot)"]
+            EC["Email Composer\n(Claude API)"]
+        end
+
+        EV["Evaluation Agent"]
+    end
+
+    subgraph WEB["Web Container — scene-scout-web"]
+        TR["Tracking Endpoint\n/track"]
+        FB["Feedback Endpoint\n/feedback"]
+        UP["User Preference Agent"]
+    end
+
+    subgraph STORES["Persistent Volumes"]
+        VF["vol-feeds\nglobal_feeds.yaml"]
+        VP["vol-profiles\nUserProfile JSON"]
+        VC2["vol-chroma\nLiked-event embeddings"]
+        VFB["vol-feedback\nFeedback SQLite"]
+        VH["vol-history\nHistory SQLite"]
+        VCA["vol-cache\nEnrichment SQLite"]
+        VPS["vol-pipeline-state\nBatch ID + events"]
+        VL["vol-logs\nJSONL run logs"]
+    end
+
+    MODAL --> PHASE1
+    VF --> FS
+    FS --> EX --> NO --> DD --> DQ --> FI
+    FI -->|submit| BATCH
+    FI -.->|check| VCA
+    BATCH -.->|write| VCA
+    VPS <-->|state| BATCH
+    BATCH -->|retrieve| PHASE2
+    VP --> RK
+    VC2 --> RK
+    RK --> SO --> CU
+    VH <--> CU
+    CU --> EC
+    EC -->|email sent| USER(("User"))
+
+    USER -->|click event link| TR
+    USER -->|not for me| FB
+    TR --> VFB
+    FB --> VFB
+    VFB --> UP
+    UP --> VP
+    UP --> VC2
+
+    GRADIO <--> VP
+    GRADIO <--> VFB
+    GRADIO <--> VH
+    GRADIO <--> VL
+    EV <--> VL

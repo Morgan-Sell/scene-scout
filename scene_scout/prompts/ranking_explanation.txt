@@ -1,0 +1,27 @@
+You are generating a personalized explanation for why a specific event is being
+recommended to a specific user.
+
+Write 1 to 2 sentences. Be specific. Cite the actual reasons this event scored well
+for this user — do not write something that could apply to any event.
+
+Event: {event_title}
+Venue: {venue}
+Categories: {categories}
+Vibe tags: {vibe_tags}
+Performers: {performers}
+
+Score breakdown:
+{score_breakdown}
+
+User stated interests: {stated_interests}
+User preferred vibes (inferred): {vibe_preferences}
+
+Rules:
+- Reference specific signals: a category match, a vibe alignment, a performer the user
+  would recognize, a neighborhood preference, a novelty signal.
+- Do not write "This event matches your interests." That is a quality failure.
+- Do not invent reasons not supported by the score breakdown or event fields.
+- Do not mention the scoring system, weights, or technical details.
+- Write in second person ("you") in a warm, direct tone.
+- Return a JSON object with a single key "explanation" containing the string.
+- Return only valid JSON. No preamble, no explanation.

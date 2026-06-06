@@ -1,0 +1,46 @@
+%%{init: {'theme': 'dark'}}%%
+flowchart TD
+    RSS["RSS Feeds\nlist[FeedConfig]"]
+
+    RSS --> A1["Feed Scout\n─────────────\nout: list[RawFeedEntry]\n     list[FeedHealthReport]"]
+
+    A1 --> A2["Event Extraction\n─────────────\nin:  list[RawFeedEntry]\nout: list[EventCandidate]\n     ├ title: str\n     ├ date: Optional[str]\n     ├ venue: Optional[str]\n     ├ is_event: bool\n     └ extraction_confidence: float"]
+
+    A2 -->|"filter: is_event=False discarded"| A3["Event Normalization\n─────────────\nin:  list[EventCandidate]\nout: list[NormalizedEvent]\n     ├ id: str (hash)\n     ├ start_datetime: datetime\n     ├ price_cents: Optional[int]\n     └ is_free: bool"]
+
+    A3 --> A4["Deduplication\n─────────────\nin:  list[NormalizedEvent]\nout: list[NormalizedEvent] (deduped)\n     + merge_log"]
+
+    A4 --> A5["Description Quality\n─────────────\nin:  list[NormalizedEvent]\nout: list[NormalizedEvent]\n     ├ description_quality_score: float\n     └ low_information: bool"]
+
+    A5 -->|"filter: low_information=True\n+ outside coming week\n+ in 2-week exclude window"| FILTER["Pre-Enrichment Filter\n─────────────\nenrichment candidates only"]
+
+    FILTER -->|"cache miss → batch"| BATCH["Claude Batch API\n─────────────\nTalent Scout + Vibe + Neighborhood\nsingle submission, single retrieval"]
+
+    BATCH --> A6["Enriched Events\n─────────────\nlist[EnrichedEvent]\n ├ performers: list[PerformerInfo]\n ├ top_performer_affinity: float\n ├ vibe_tags: list[str]\n ├ neighborhood_context: Optional[str]\n └ neighborhood_confidence: float"]
+
+    PROF["UserProfile\n─────────────\n├ category_weights\n└ vibe_preferences"] --> A7
+    CHROMA["Chroma Index\nvol-chroma"] --> A7
+
+    A6 --> A7["Ranking Agent\n─────────────\nin:  list[EnrichedEvent] + UserProfile + Chroma\nout: list[RankedEvent]\n     ├ score: float\n     ├ score_breakdown: dict[str, float]\n     │   ├ category_fit\n     │   ├ vibe_fit\n     │   ├ semantic_similarity\n     │   ├ performer_affinity\n     │   ├ location\n     │   ├ novelty\n     │   ├ source_quality\n     │   └ description_quality\n     ├ explanation: str\n     └ wildcard_slot: bool"]
+
+    A7 --> A8["Sell-Out Risk\n─────────────\nin:  list[RankedEvent]\nout: list[RankedEvent]\n     └ sellout_risk: low|medium|high"]
+
+    HIST["Recommendation History\nvol-history"] --> A9
+
+    A8 --> A9["Recommendation Curator (Margot)\n─────────────\nin:  list[RankedEvent] + history\nout: list[CuratedRecommendation] ≤10\n     ├ rank: int\n     ├ explanation: str (intact)\n     ├ neighborhood_context: Optional[str]\n     ├ sellout_urgency_note: Optional[str]\n     ├ feedback_token: str (UUID)\n     └ is_wildcard: bool"]
+
+    A9 --> A10["Email Composer\n─────────────\nin:  list[CuratedRecommendation] + UserProfile\nout: HTML email\n     └ tracking links per recommendation\n         ├ /track?token=X&signal=click&redirect=...\n         └ /feedback?token=X&signal=negative"]
+
+    A10 --> EMAIL["User Email"]
+
+    EMAIL -->|"click event link"| SIG1["FeedbackEvent\n─────────────\n├ signal: click\n├ token: str\n├ event_categories: list[str]\n├ score_breakdown: dict\n├ rank: int\n└ run_id: str"]
+
+    EMAIL -->|"not for me"| SIG2["FeedbackEvent\n─────────────\n└ signal: negative"]
+
+    SIG1 --> FBSTORE["vol-feedback\nSQLite"]
+    SIG2 --> FBSTORE
+
+    FBSTORE --> UPA["User Preference Agent\n─────────────\napplies decay-weighted delta\nto category_weights + vibe_preferences\nupdates Chroma with positive signals"]
+
+    UPA --> PROF
+    UPA --> CHROMA
