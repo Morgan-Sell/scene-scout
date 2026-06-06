@@ -1,13 +1,12 @@
 """
 Tests for the Feed Scout Agent.
 
-These tests use mocked HTTP responses so they run offline and
-deterministically. We are testing our logic: config loading, async
-concurrent fetching, entry parsing, health report production, and
-failure handling.
+Covers: successful fetch, ETag/304 change detection, all failure modes,
+multi-feed isolation, run_id propagation, validate_feed(), and the
+FeedStatus.UNCHANGED path.
 
-pytest-asyncio handles the async test runner. respx mocks httpx at
-the transport level so our actual async client code executes normally.
+All HTTP responses are mocked via respx so tests run offline and
+deterministically. We test our logic, not feedparser or httpx.
 """
 
 from datetime import datetime, timezone
@@ -61,7 +60,10 @@ EMPTY_RSS = """<?xml version="1.0" encoding="UTF-8"?>
 </rss>"""
 
 
-def _make_config(url: str = "https://example.com/feed", feed_id: str = "test_feed") -> FeedConfig:
+def _make_config(
+    url: str = "https://example.com/feed",
+    feed_id: str = "test_feed",
+) -> FeedConfig:
     return FeedConfig(
         id=feed_id,
         name="Test Feed",
@@ -88,6 +90,7 @@ def test_load_feed_configs_validates_schema():
         assert isinstance(config.id, str) and config.id
         assert isinstance(config.url, str) and config.url
         assert 0.0 <= config.source_quality_score <= 1.0
+        assert config.cursor is None  # Always None for RSS feeds
 
 
 def test_load_feed_configs_raises_on_missing_file():
@@ -96,28 +99,25 @@ def test_load_feed_configs_raises_on_missing_file():
 
 
 # ---------------------------------------------------------------------------
-# Successful feed fetch
+# Successful fetch
 # ---------------------------------------------------------------------------
 
 @respx.mock
 async def test_successful_feed_returns_entries():
-    """A healthy feed produces RawFeedEntry objects and an OK health report."""
     config = _make_config()
     respx.get(config.url).mock(return_value=Response(200, text=MINIMAL_RSS))
 
     entries, reports = await feed_scout.run([config], run_id=TEST_RUN_ID)
 
     assert len(reports) == 1
-    report = reports[0]
-    assert report.status == FeedStatus.OK
-    assert report.succeeded is True
-    assert report.entries_fetched == 2
+    assert reports[0].status == FeedStatus.OK
+    assert reports[0].succeeded is True
+    assert reports[0].entries_fetched == 2
     assert len(entries) == 2
 
 
 @respx.mock
-async def test_raw_entry_fields_are_preserved_faithfully():
-    """Entry fields are captured exactly as the feed provides them — no parsing."""
+async def test_raw_entry_fields_preserved_faithfully():
     config = _make_config()
     respx.get(config.url).mock(return_value=Response(200, text=MINIMAL_RSS))
 
@@ -128,8 +128,7 @@ async def test_raw_entry_fields_are_preserved_faithfully():
     assert first.link == "https://example.com/jazz-night"
     assert "jazz evening" in first.description.lower()
     assert "Music" in first.categories or "Jazz" in first.categories
-    # published_raw preserved as string — not parsed
-    assert isinstance(first.published_raw, str)
+    assert isinstance(first.published_raw, str)  # Not parsed — preserved as string
     assert first.feed_id == "test_feed"
     assert first.run_id == TEST_RUN_ID
     assert isinstance(first.fetched_at, datetime)
@@ -137,13 +136,101 @@ async def test_raw_entry_fields_are_preserved_faithfully():
 
 @respx.mock
 async def test_run_id_attached_to_every_entry():
-    """Every entry produced carries the run_id of the pipeline execution."""
     config = _make_config()
     respx.get(config.url).mock(return_value=Response(200, text=MINIMAL_RSS))
 
     entries, _ = await feed_scout.run([config], run_id=TEST_RUN_ID)
 
     assert all(e.run_id == TEST_RUN_ID for e in entries)
+
+
+# ---------------------------------------------------------------------------
+# ETag / 304 change detection
+# ---------------------------------------------------------------------------
+
+@respx.mock
+async def test_etag_stored_after_successful_fetch():
+    """ETag and Last-Modified values from a successful response are stored."""
+    config = _make_config()
+    respx.get(config.url).mock(return_value=Response(
+        200,
+        text=MINIMAL_RSS,
+        headers={"ETag": '"abc123"', "Last-Modified": "Mon, 01 Jan 2025 00:00:00 GMT"},
+    ))
+
+    stored = {}
+
+    def store_etag(feed_id, etag, last_modified):
+        stored[feed_id] = (etag, last_modified)
+
+    await feed_scout.run([config], run_id=TEST_RUN_ID, store_feed_etag=store_etag)
+
+    assert config.id in stored
+    assert stored[config.id] == ('"abc123"', "Mon, 01 Jan 2025 00:00:00 GMT")
+
+
+@respx.mock
+async def test_conditional_headers_sent_when_etag_cached():
+    """If-None-Match and If-Modified-Since headers are sent when cached values exist."""
+    config = _make_config()
+    captured_headers: dict = {}
+
+    def capture_request(request):
+        captured_headers.update(dict(request.headers))
+        return Response(200, text=MINIMAL_RSS)
+
+    respx.get(config.url).mock(side_effect=capture_request)
+
+    def get_etag(feed_id):
+        return ('"cached-etag"', "Mon, 01 Jan 2025 00:00:00 GMT")
+
+    await feed_scout.run([config], run_id=TEST_RUN_ID, get_feed_etag=get_etag)
+
+    assert captured_headers.get("if-none-match") == '"cached-etag"'
+    assert captured_headers.get("if-modified-since") == "Mon, 01 Jan 2025 00:00:00 GMT"
+
+
+@respx.mock
+async def test_304_response_produces_unchanged_status_no_entries():
+    """A 304 Not Modified response results in UNCHANGED status and no entries."""
+    config = _make_config()
+    respx.get(config.url).mock(return_value=Response(304))
+
+    entries, reports = await feed_scout.run([config], run_id=TEST_RUN_ID)
+
+    assert entries == []
+    assert reports[0].status == FeedStatus.UNCHANGED
+    assert reports[0].skipped is True
+    assert reports[0].succeeded is False
+    assert reports[0].entries_fetched == 0
+    assert reports[0].etag_supported is True
+
+
+@respx.mock
+async def test_feed_with_etag_support_flagged_in_report():
+    """Feeds that return ETag headers have etag_supported=True in their report."""
+    config = _make_config()
+    respx.get(config.url).mock(return_value=Response(
+        200,
+        text=MINIMAL_RSS,
+        headers={"ETag": '"version-1"'},
+    ))
+
+    _, reports = await feed_scout.run([config], run_id=TEST_RUN_ID)
+
+    assert reports[0].etag_supported is True
+    assert reports[0].etag == '"version-1"'
+
+
+@respx.mock
+async def test_feed_without_etag_flagged_as_not_supported():
+    """Feeds that do not return ETag or Last-Modified have etag_supported=False."""
+    config = _make_config()
+    respx.get(config.url).mock(return_value=Response(200, text=MINIMAL_RSS))
+
+    _, reports = await feed_scout.run([config], run_id=TEST_RUN_ID)
+
+    assert reports[0].etag_supported is False
 
 
 # ---------------------------------------------------------------------------
@@ -191,31 +278,45 @@ async def test_empty_feed_produces_empty_report():
 
 @respx.mock
 async def test_one_failed_feed_does_not_stop_others():
-    """A failure on one feed does not prevent other feeds from being processed."""
-    good_config = _make_config("https://good.example.com/feed", feed_id="good_feed")
-    bad_config = _make_config("https://bad.example.com/feed", feed_id="bad_feed")
+    """Failure on one feed does not prevent other feeds from being processed."""
+    good = _make_config("https://good.example.com/feed", "good_feed")
+    bad = _make_config("https://bad.example.com/feed", "bad_feed")
 
-    respx.get(good_config.url).mock(return_value=Response(200, text=MINIMAL_RSS))
-    respx.get(bad_config.url).mock(return_value=Response(503))
+    respx.get(good.url).mock(return_value=Response(200, text=MINIMAL_RSS))
+    respx.get(bad.url).mock(return_value=Response(503))
 
-    entries, reports = await feed_scout.run(
-        [good_config, bad_config], run_id=TEST_RUN_ID
-    )
+    entries, reports = await feed_scout.run([good, bad], run_id=TEST_RUN_ID)
 
     assert len(reports) == 2
     assert reports[0].succeeded is True
     assert reports[1].succeeded is False
-    # Entries only from the good feed
     assert len(entries) == 2
     assert all(e.feed_id == "good_feed" for e in entries)
 
 
 @respx.mock
+async def test_unchanged_feed_does_not_affect_other_feeds():
+    """A 304 UNCHANGED feed does not prevent other feeds from returning entries."""
+    ok_feed = _make_config("https://ok.example.com/feed", "ok_feed")
+    unchanged_feed = _make_config("https://unchanged.example.com/feed", "unchanged_feed")
+
+    respx.get(ok_feed.url).mock(return_value=Response(200, text=MINIMAL_RSS))
+    respx.get(unchanged_feed.url).mock(return_value=Response(304))
+
+    entries, reports = await feed_scout.run(
+        [ok_feed, unchanged_feed], run_id=TEST_RUN_ID
+    )
+
+    statuses = {r.feed_id: r.status for r in reports}
+    assert statuses["ok_feed"] == FeedStatus.OK
+    assert statuses["unchanged_feed"] == FeedStatus.UNCHANGED
+    assert len(entries) == 2  # Only from ok_feed
+
+
+@respx.mock
 async def test_all_feeds_fetched_concurrently():
-    """Both feeds are fetched and both produce results — concurrent execution verified
-    by the fact that both mocks are called and both results are returned."""
-    config_a = _make_config("https://feed-a.example.com/feed", feed_id="feed_a")
-    config_b = _make_config("https://feed-b.example.com/feed", feed_id="feed_b")
+    config_a = _make_config("https://feed-a.example.com/feed", "feed_a")
+    config_b = _make_config("https://feed-b.example.com/feed", "feed_b")
 
     respx.get(config_a.url).mock(return_value=Response(200, text=MINIMAL_RSS))
     respx.get(config_b.url).mock(return_value=Response(200, text=MINIMAL_RSS))

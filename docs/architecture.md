@@ -45,7 +45,7 @@ scene_scout/
 - **Degrade gracefully at the record level** — a malformed event, a failed enrichment
   call, or a missing performer note does not stop the pipeline. The record continues with
   empty/default values for the failed fields and a logged warning.
-- **Fail fast at the infrastructure level** — a Claude API outage, a Resend failure, or
+- **Fail fast at the infrastructure level** — an API outage, a Resend failure, or
   a Modal volume mount error halts the pipeline immediately with a clear error.
 
 The distinction: data quality failures are expected and recoverable. Infrastructure
@@ -125,7 +125,7 @@ Switching providers: change `LLM_MODEL` only. No agent code changes.
 LLM_MODEL=gpt-4o                   # OpenAI
 LLM_MODEL=mistral/mistral-large    # Mistral
 LLM_MODEL=ollama/llama3            # Local via Ollama
-LLM_MODEL=claude-sonnet-4-6      # Anthropic (default)
+LLM_MODEL=claude-sonnet-4-6       # Anthropic (default)
 ```
 
 ### Centralized LLM Service
@@ -182,8 +182,6 @@ async def complete(
 All prompts are Jinja2 templates. Loaded and rendered via a single function.
 
 ```python
-# scene_scout/services/prompt_loader.py
-
 def render_prompt(name: str, **kwargs) -> str:
     """
     Load and render a Jinja2 prompt template.
@@ -212,8 +210,6 @@ def render_prompt(name: str, **kwargs) -> str:
 ### Batch Strategy
 
 ```python
-# scene_scout/services/batch.py
-
 class BatchStrategy(Protocol):
     async def submit(self, requests: list[BatchRequest], run_id: str) -> str: ...
     async def poll(self, batch_id: str) -> BatchResults: ...
@@ -261,9 +257,6 @@ docker/
 docker-compose.yml     ← local development only
 ```
 
-Pipeline and web are split because they have different runtime profiles: pipeline runs
-once weekly for minutes; web runs continuously and must respond in milliseconds.
-
 ---
 
 ## Package Management: uv
@@ -271,10 +264,6 @@ once weekly for minutes; web runs continuously and must respond in milliseconds.
 ```bash
 uv venv && source .venv/bin/activate
 uv sync --all-extras
-
-uv add litellm resend jinja2 nominatim
-uv add --dev pytest respx
-
 uv run pytest tests/
 uv run python -m scene_scout.cli uat --prompt "..."
 ```
@@ -283,15 +272,88 @@ uv run python -m scene_scout.cli uat --prompt "..."
 
 ---
 
+## Feed Processing: Entry Deduplication and Change Detection
+
+RSS feeds present two efficiency problems that require explicit solutions at the
+orchestration layer, not within individual agents.
+
+### Problem 1: Unchanged Feeds (HTTP-Level)
+
+Before parsing, the Feed Scout checks whether a feed has changed since the last fetch
+using standard HTTP conditional request headers:
+
+- `If-None-Match: {etag}` — server returns `304 Not Modified` if content is unchanged
+- `If-Modified-Since: {last_modified}` — same 304 behavior based on timestamp
+
+On a `304` response, the feed is skipped entirely: no parsing, no extraction calls,
+no downstream processing. ETag and `Last-Modified` values are stored in the `feed_etags`
+table in `vol-cache` after each successful fetch and sent on the next request.
+
+Not all RSS feeds support these headers. This is best-effort. Feeds without support fall
+through to normal parsing. ETag support rate is logged per feed and visible in the
+Gradio Dev Section feed health dashboard.
+
+### Problem 2: Re-Processing Known Entries (Entry-Level)
+
+The same event frequently appears in the same feed across multiple consecutive weekly
+runs (a concert listed 3 weeks in a row). It also frequently appears across multiple
+feeds simultaneously (the same event promoted by 3 LA event sources in the same week).
+
+**The `seen_entries` cache** prevents redundant LLM extraction and normalization calls
+for entries already processed in a prior run.
+
+**Cache key:** `(feed_id, hash(link + published_raw))`
+
+The key includes `feed_id` deliberately. The same real-world event appearing in two
+different feeds gets two separate cache entries — one per source. This preserves the
+source provenance information that the Deduplication Agent uses when merging records
+and computing `source_count`. Collapsing cache entries across feeds would silently
+lose this signal.
+
+**Cache value:** The full `NormalizedEvent` JSON from the prior run's extraction and
+normalization of this entry.
+
+**Cache TTL:** 14 days. Long enough to skip recurring entries. Short enough that a
+corrected or updated event (venue change, date correction) gets re-extracted.
+
+**Orchestrator flow:**
+```
+RawFeedEntry from Feed Scout
+  |
+  v
+Check seen_entries cache (feed_id, entry_hash)
+  |-- Cache hit, not expired  --> retrieve NormalizedEvent; skip Extraction + Normalization
+  |-- Cache miss or expired   --> send to Extraction Agent
+                                  --> Normalization Agent
+                                  --> write result to seen_entries cache
+```
+
+### Why Multiple Copies of the Same Event Are Acceptable
+
+When the same real-world event appears in 3 feeds, the pipeline will:
+1. Produce 3 separate `NormalizedEvent` records — one per feed source
+2. Store 3 `seen_entries` cache entries (keyed by feed_id + entry hash)
+3. Collapse all 3 into 1 merged record in the Deduplication Agent
+
+The merged record carries `source_count: 3` and `source_feeds: ["feed_a", "feed_b", "feed_c"]`.
+This cross-feed coverage is a weak positive ranking signal (`source_coverage` score component).
+The incremental storage cost is negligible. The deduplication prevents any user-facing
+duplication.
+
+---
+
 ## Deployment: Modal
 
 ### Scheduled Pipeline
 
-Single long-running Modal function. Two-phase execution within one function:
+Single long-running Modal function. Two-phase execution:
 
 ```
 Phase 1 — Ingest and normalize:
-  Feed Scout → Extraction → Normalization → Deduplication → Description Quality
+  Feed Scout (ETag/304 check → skip UNCHANGED feeds)
+  → seen_entries cache check → skip known entries
+  → Extraction (new entries only)
+  → Normalization → Deduplication → Description Quality
   → Pre-enrichment filter
   → Geocode venues (Nominatim, cached)
   → Submit enrichment batch (Talent Scout + Vibe + Neighborhood Scout)
@@ -312,10 +374,8 @@ LLM_API_KEY    →  Modal secret: llm
 RESEND_API_KEY →  Modal secret: resend
 USER_EMAIL     →  Modal secret: user       ← source of truth for email delivery
 USER_NAME      →  Modal secret: user       ← used in email salutation
+GRADIO_PASSWORD → Modal secret: gradio
 ```
-
-`UserProfile.email` stores a copy for reference and logging. Email Composer reads from
-Modal Secret, not the profile, to prevent stale profile data causing misdelivery.
 
 ### Persistent Volumes — One Per Store
 
@@ -325,24 +385,77 @@ Modal Secret, not the profile, to prevent stale profile data causing misdelivery
 | `vol-feedback` | SQLite feedback log | Feedback Service |
 | `vol-history` | SQLite recommendation history | Curator Agent |
 | `vol-profiles` | JSON user profile | User Preference Agent |
-| `vol-cache` | SQLite enrichment + geocoding cache | Enrichment agents |
+| `vol-cache` | SQLite: seen_entries, feed_etags, performer, venue, vibe caches | Cache Service |
 | `vol-pipeline-state` | `PipelineState` JSON; cleared post-run | Orchestrator |
 | `vol-logs` | Structured JSONL run logs; 90-day retention | All agents |
 
 ### Log Retention
 
-- `vol-logs`: 90-day rolling retention. Logs older than 90 days are deleted at the
-  start of each pipeline run.
-- `vol-pipeline-state`: Cleared immediately after successful Phase 2 completion.
-  Retained on failure for debugging and potential manual resume.
+- `vol-logs`: 90-day rolling retention. Deleted at pipeline start.
+- `vol-pipeline-state`: Cleared after successful Phase 2. Retained on failure.
 - `vol-cache`: TTL-based expiry only. No size cap in v1.
+
+---
+
+## vol-cache SQLite Schema
+
+All caching lives in a single `vol-cache` volume with one table per concern.
+
+```sql
+-- HTTP conditional request headers per feed
+CREATE TABLE feed_etags (
+    feed_id          TEXT PRIMARY KEY,
+    etag             TEXT,
+    last_modified    TEXT,
+    stored_at        DATETIME NOT NULL
+);
+
+-- Processed feed entries — prevents re-extraction across runs
+-- Key is (feed_id, entry_hash) so same event from different feeds gets separate entries
+CREATE TABLE seen_entries (
+    feed_id               TEXT NOT NULL,
+    entry_hash            TEXT NOT NULL,     -- hash(link + published_raw)
+    normalized_event_json TEXT NOT NULL,     -- full NormalizedEvent JSON
+    first_seen_at         DATETIME NOT NULL,
+    expires_at            DATETIME NOT NULL, -- first_seen_at + 14 days
+    PRIMARY KEY (feed_id, entry_hash)
+);
+
+-- Performer enrichment
+CREATE TABLE performer_cache (
+    performer_name_key    TEXT PRIMARY KEY,  -- normalized lowercase
+    performer_info_json   TEXT NOT NULL,
+    cached_at             DATETIME NOT NULL,
+    expires_at            DATETIME NOT NULL  -- +90 days
+);
+
+-- Venue geocoding and neighborhood context
+CREATE TABLE venue_cache (
+    venue_key                TEXT PRIMARY KEY, -- normalized venue_name + city
+    coordinates_json         TEXT,             -- {"lat": float, "lon": float}
+    poi_list_json            TEXT,             -- list of nearby POI dicts within 1km
+    neighborhood_context     TEXT,
+    neighborhood_confidence  REAL,
+    cached_at                DATETIME NOT NULL,
+    geo_expires_at           DATETIME NOT NULL,     -- +90 days
+    context_expires_at       DATETIME NOT NULL      -- +30 days
+);
+
+-- Vibe tag cache
+CREATE TABLE vibe_cache (
+    content_hash    TEXT PRIMARY KEY,  -- SHA-256(description + categories)
+    vibe_tags_json  TEXT NOT NULL,
+    cached_at       DATETIME NOT NULL,
+    expires_at      DATETIME NOT NULL  -- +14 days
+);
+```
 
 ---
 
 ## UAT Mode
 
 UAT mode runs the full pipeline end-to-end and **sends a real email** to `USER_EMAIL`.
-This is a true end-to-end test. If the email did not arrive, the test did not pass.
+If the email did not arrive, the test did not pass.
 
 ```bash
 uv run python -m scene_scout.cli uat --prompt "I love experimental music and independent
@@ -353,18 +466,21 @@ uv run python -m scene_scout.cli uat --prompt "..." --dry-run
 ```
 
 **UAT behavior:**
-- Sends real email to `USER_EMAIL`; subject prefixed `[UAT {run_id}]`
+- Sends real email; subject prefixed `[UAT {run_id}]`
 - Runs synchronously (batch polling is inline)
 - Emits verbose color-coded `rich` logs to terminal
-- Writes `output/uat_{run_id}/email_preview.html` for browser inspection
-- Writes `output/uat_{run_id}/summary.json`
+- Writes `output/uat_{run_id}/email_preview.html`
+- Writes `output/uat_{run_id}/summary.json` including:
+  - Entry counts per feed
+  - Feeds skipped via 304 (UNCHANGED)
+  - seen_entries cache hit rate
+  - Entries sent to extraction vs. retrieved from cache
+  - Post-filter counts, enrichment cache hit rates, top 10 titles and scores
 - Prints final summary table on completion
-
-**`--dry-run`** skips email send; writes preview file only.
 
 **Log color scheme:**
 
-| Agent | Color |
+| Agent / Service | Color |
 |---|---|
 | Orchestrator | White |
 | Feed Scout | Cyan |
@@ -387,8 +503,8 @@ uv run python -m scene_scout.cli uat --prompt "..." --dry-run
 
 | Level | Content |
 |---|---|
-| `INFO` | Agent start/complete, record counts, cache rates, send confirmation |
-| `WARNING` | Feed failures, low-confidence enrichments, sub-10 candidates |
+| `INFO` | Agent start/complete, entry counts, cache hit rates (ETag + seen_entries), send confirmation |
+| `WARNING` | Feed failures, UNCHANGED feeds summary, low-confidence enrichments, sub-10 candidates |
 | `ERROR` | Schema failures, API errors, send failures |
 | `DEBUG` | Per-record detail; `--verbose` flag only |
 
@@ -402,31 +518,25 @@ run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 ```
 
 Generated once by orchestrator. Passed explicitly to every agent and service call.
-Never a global. Attached to all logs, entries, recommendations, and feedback events.
+Never a global.
 
 ---
 
 ## The Curator: Allegra
 
-SceneScout's recommendation curator is **Allegra**.
-
 **Name etymology:** Italian/Latin — "joyful," "lively." Musical resonance: *allegro*.
-Internationally legible. Works in any city. The musical meaning fits a curator of live
-events precisely — and it's subtle enough that most users won't consciously register it.
+Internationally legible. Works in any city.
 
-**Character brief:**
-Allegra has her own creative practice — she doesn't advertise it. She knows the bookers,
-the gallerists, the programmers in whatever city the user is in. She goes to things because
-she genuinely wants to, not because she's working. Her tone is warm but never gushing,
-direct but never terse. She makes you feel like you're being let in on something.
-She is location-agnostic — equally at home recommending events in Los Angeles, London,
-Tokyo, or Berlin.
+**Character brief:** Allegra has her own creative practice — she doesn't advertise it.
+She knows the bookers, the gallerists, the programmers in whatever city the user is in.
+Her tone is warm but never gushing, direct but never terse. Location-agnostic — equally
+at home in Los Angeles, London, Tokyo, or Berlin.
 
-**Voice rules (enforced in `prompts/curator_voice.txt`):**
+**Voice rules:**
 - First person, addressed directly to the user
 - Warm and specific — never promotional
 - Never uses the word "curated"
-- When fewer than 10 events pass: says so plainly, no apology, no padding
+- Fewer than 10 events: says so plainly, no apology, no padding
 
 ```python
 class CuratorConfig(BaseModel):
@@ -438,22 +548,17 @@ class CuratorConfig(BaseModel):
 
 ## User Onboarding
 
-On first use, the user provides three things via the Gradio UI:
-
-1. **Name** — used in email salutation (`Dear {name},`)
+On first use, the user provides via Gradio:
+1. **Name** — used in email salutation
 2. **Email address** — stored in Modal Secrets as `USER_EMAIL`; copied to `UserProfile`
-3. **Cold-start prompt** — free-text description of interests, dislikes, and constraints
-
-The User Preference Agent parses the prompt into a structured `UserProfile`. The name
-and email are stored immediately. No other onboarding is required.
+3. **Cold-start prompt** — free-text interests, dislikes, and constraints
 
 ---
 
 ## Personalization Model
 
 ### Phase 1 — Cold Start
-User submits name, email, and free-text prompt. User Preference Agent parses prompt into
-`UserProfile`. Bootstraps the ranker immediately.
+Prompt parsed into `UserProfile`. Bootstraps the ranker immediately.
 
 ### Phase 2 — Warm Personalization
 
@@ -464,7 +569,6 @@ User submits name, email, and free-text prompt. User Preference Agent parses pro
 | Future: "I went" | Strong positive | +0.10 per category |
 
 Stated preferences → hard constraints. Revealed → soft adjustments within constraints.
-Gap exceeds threshold → surface tension to user in Gradio; never silently override.
 
 ### Personalization Strategies (priority order)
 1. Category weight decay — `e^(-λt)`, half-life ~30 days
@@ -480,21 +584,18 @@ Gap exceeds threshold → surface tension to user in Gradio; never silently over
 Deterministic weighted rubric. No LLM in v1.
 
 ```python
-# scene_scout/config.py
-DESCRIPTION_QUALITY_THRESHOLD: float = 0.3  # low_information = score < this
+DESCRIPTION_QUALITY_THRESHOLD: float = 0.3  # configurable in config.py
 ```
 
 | Signal | Weight | Measurement |
 |---|---|---|
 | Description length | 0.20 | 0 chars → 0.0 / <50 → 0.3 / 50–150 → 0.7 / 150+ → 1.0 |
-| Venue presence | 0.20 | Non-null, non-generic ("TBD", "Various") → 1.0; else 0.0 |
+| Venue presence | 0.20 | Non-null, non-generic → 1.0; else 0.0 |
 | Date + time present | 0.20 | Both → 1.0 / date only → 0.5 / neither → 0.0 |
 | Performer/artist named | 0.15 | Named performer in title or description → 1.0; else 0.0 |
 | Category coverage | 0.10 | ≥1 non-generic category → 1.0; else 0.0 |
 | URL validity | 0.10 | Present and well-formed → 1.0; else 0.0 |
 | Price clarity | 0.05 | `price_cents` set OR `is_free=True` → 1.0; else 0.0 |
-
-`low_information = score < DESCRIPTION_QUALITY_THRESHOLD`
 
 Applied as a confidence discount in Ranking, not a hard filter.
 
@@ -502,33 +603,15 @@ Applied as a confidence discount in Ranking, not a hard filter.
 
 ## Neighborhood Scout: Hyper-Local Architecture
 
-Operates within a strict **15–20 minute walking radius** (~1 km) from the venue.
-LLM recall cannot reliably reason about walking distances. Spatial data is required.
+Strict **15–20 minute walking radius** (~1 km) from the venue.
 
-### Two-Mode Architecture
+**Mode A — Geocoding-assisted (primary):** Nominatim geocodes venue → `(lat, lon)` →
+POIs within ~1 km → passed as structured context to LLM. LLM narrates what it is given.
 
-**Mode A — Geocoding-assisted (primary):**
-1. Geocode venue via Nominatim → `(lat, lon)`
-2. Query Nominatim for POIs within ~1 km: bars, restaurants, cafés, venues, galleries
-3. Pass POI list as structured context to the LLM
-4. LLM narrates and curates — it writes about facts it is given, not facts it recalls
+**Mode B — LLM-only fallback:** General neighborhood character note only. No specific
+businesses. Honest and safe.
 
-**Mode B — LLM-only fallback:**
-When geocoding fails or venue is unknown → general neighborhood character note only.
-No specific business recommendations. Honest and safe.
-
-### Geocoding Cache
-- **Key:** `venue_name + city` (normalized)
-- **Value:** `(lat, lon)` + POI list JSON
-- **TTL:** 90 days
-
-### Neighborhood Context Cache
-- **Key:** `venue_name + city` (normalized)
-- **Value:** context string + confidence float
-- **TTL:** 30 days
-
-Nominatim rate limit: 1 request/second. Cache aggressively. Not a constraint for a
-weekly pipeline.
+**Cache:** `venue_cache` table. Geocoding TTL 90 days. Context TTL 30 days.
 
 ---
 
@@ -543,31 +626,13 @@ immersive       underground     high-production free-spirited   niche
 single-friendly pretentious     exclusive       inclusive
 ```
 
-`single-friendly` — comfortable solo; easy to meet people
-`pretentious` — artistically serious; self-consciously avant-garde (not pejorative)
-`exclusive` — curated entry, VIP feel, high barrier
-`inclusive` — explicitly welcoming, diverse, low pressure
-
-Quality check: any tag exceeding 40% of events in a run → classifier collapse. Investigate.
+Quality check: any tag exceeding 40% of events in a run → classifier collapse.
 
 ---
 
 ## Ranking Agent: Design Rationale
 
-**Deterministic scoring** for score computation. **LLM generation** for explanations.
-These are intentionally separate responsibilities.
-
-Score computation must be reproducible: same inputs → same outputs, always. Stochastic
-scoring makes the system impossible to debug or evaluate systematically.
-
-Explanation generation is a natural language task where some variation is acceptable.
-The LLM receives the score breakdown and event fields; it narrates the reasons. It does
-not invent reasons.
-
-**v2 path — LLM-as-judge reranking (Milestone 10):**
-After deterministic scoring, pass top 20 candidates to an LLM with the user profile.
-LLM produces final top 10 with reasoning. Editorial layer *on top of* scores, not
-instead of them.
+**Deterministic scoring** for score computation. **LLM generation** for explanations only.
 
 **Score components:**
 - `category_fit` — overlap with `UserProfile.category_weights`
@@ -576,11 +641,15 @@ instead of them.
 - `performer_affinity` — `top_performer_affinity` from Talent Scout
 - `location` — proximity to user's preferred neighborhoods
 - `novelty` — penalty for previously recommended; bonus for unseen categories/vibes
-- `source_quality` — from feed config
+- `source_quality` — from feed config (`best_source_feed.source_quality_score`)
+- `source_coverage` — normalized `source_count`; weak positive for multi-feed events
 - `description_quality` — confidence discount for `low_information` records
 
 All components normalized to 0.0–1.0. Composite is a weighted sum. Weights are named
 constants in `config.py`.
+
+**v2 path — LLM-as-judge reranking (Phase 10):** Deterministic top 20 → LLM editorial
+layer → final top 10. On top of scores, not instead of them.
 
 ---
 
@@ -588,44 +657,31 @@ constants in `config.py`.
 
 | Test Type | Scope | Fixture Approach | Runs In |
 |---|---|---|---|
-| Unit tests | Agent logic, deterministic components, services | Mocked LLM calls (`services/llm.py` mocked) | CI on every commit |
-| Integration tests | Agent-to-agent data flow; schema contracts | Mocked LLM; real SQLite/Chroma | CI on every commit |
-| Prompt regression tests | LLM output quality; schema validity | Golden file fixtures (real API responses) | Manually; weekly |
-| UAT | Full end-to-end pipeline; real email sent | Live API calls | Manually before each milestone |
-
-**Golden file fixtures:** A set of stored real LLM responses as JSON files in
-`tests/fixtures/golden/`. Prompt regression tests run against these. Regenerate
-periodically against the live API to catch prompt drift.
+| Unit tests | Agent logic, deterministic components, services | Mocked LLM + HTTP | CI |
+| Integration tests | Agent-to-agent data flow; cache behavior | Mocked LLM; real SQLite | CI |
+| Prompt regression | LLM output quality; schema validity | Golden file fixtures | Manually |
+| UAT | Full end-to-end pipeline; real email | Live API calls | Manually |
 
 ---
 
 ## Gradio UI
 
-Built-in Gradio auth enabled from day one:
 ```python
 gr.Blocks(auth=("username", os.getenv("GRADIO_PASSWORD")))
 ```
-Password stored in Modal Secrets as `GRADIO_PASSWORD`.
 
-**User-facing sections:**
-- Onboarding (name, email, cold-start prompt)
-- Profile viewer and editor
-- Feedback history
-- Feed management (add, validate, disable user feeds)
+**User-facing:** Onboarding, profile viewer/editor, feedback history, feed management.
 
-**Dev Section (password-protected):**
-- Pipeline run log viewer (filter by `run_id`, agent, level)
-- Feed health dashboard
-- Global feed management
-- Dry-run trigger and email preview
-- Recommendation history browser
-- Cache inspection (hit rates, TTL status)
+**Dev Section:** Run log viewer (filter by `run_id`, agent, level), feed health dashboard
+(ETag support coverage, seen_entries hit rates, yield per feed), global feed management,
+dry-run trigger, recommendation history browser, cache inspection.
 
 ---
 
 ## Agent Roster
 
 ### 1. Feed Scout Agent
+
 | | |
 |---|---|
 | Inputs | `list[FeedConfig]`, `run_id: str` |
@@ -635,17 +691,48 @@ Password stored in Modal Secrets as `GRADIO_PASSWORD`.
 | Log color | Cyan |
 | Failure handling | Per-feed: log + skip. Never halts pipeline. |
 
+Reads full feed snapshot (typically 10–50 entries). No artificial cap. Temporal scoping
+handled by Normalization Agent's 7-day date filter downstream.
+
+Sends `If-None-Match` / `If-Modified-Since` on every request. On `304`, status is
+`UNCHANGED`; feed is skipped. ETag/Last-Modified stored in `feed_etags` after each
+successful fetch.
+
+```python
+class FeedStatus(str, Enum):
+    OK          = "ok"
+    UNCHANGED   = "unchanged"    # 304 Not Modified; skipped cleanly
+    UNREACHABLE = "unreachable"
+    MALFORMED   = "malformed"
+    EMPTY       = "empty"
+    STALE       = "stale"
+
+class FeedConfig(BaseModel):
+    id: str
+    name: str
+    url: str
+    city: str
+    source_quality_score: float
+    active: bool = True
+    notes: Optional[str] = None
+    cursor: Optional[str] = None  # Always None for RSS; reserved for cursor-based APIs
+```
+
 ---
 
 ### 2. Event Extraction Agent
+
 | | |
 |---|---|
 | Inputs | `list[RawFeedEntry]`, `run_id: str` |
 | Outputs | `list[EventCandidate]` |
 | LLM | Yes — via `llm.complete()` |
-| Deterministic | Schema validation + `is_event` filter |
 | Log color | Blue |
 | Failure handling | Per-entry: log + skip on `LLMValidationError` |
+
+The orchestrator checks `seen_entries` before invoking this agent. Only cache-miss
+entries reach the Extraction Agent. Cache hits return stored `NormalizedEvent` records
+directly, bypassing both extraction and normalization.
 
 ```python
 class EventCandidate(BaseModel):
@@ -669,18 +756,19 @@ class EventCandidate(BaseModel):
 ---
 
 ### 3. Event Normalization Agent
+
 | | |
 |---|---|
 | Inputs | `list[EventCandidate]`, `run_id: str` |
 | Outputs | `list[NormalizedEvent]` |
 | LLM | Sparingly via `llm.complete()` |
-| Deterministic | Yes — date parsing, URL validation, category standardization |
+| Deterministic | Yes |
 | Log color | Blue |
 | Failure handling | Per-record: unparseable date → log + discard |
 
 ```python
 class NormalizedEvent(BaseModel):
-    id: str                        # SHA-256: title + date + venue
+    id: str                         # SHA-256: title + date + venue
     title: str
     start_datetime: datetime
     end_datetime: Optional[datetime]
@@ -692,8 +780,10 @@ class NormalizedEvent(BaseModel):
     is_free: bool
     description: str
     categories: list[str]
-    source_feed: str
-    source_quality_score: float
+    source_feeds: list[str]         # All feeds that provided this entry (pre-dedup)
+    source_count: int               # Number of distinct source feeds
+    best_source_feed: str           # Feed with highest source_quality_score
+    source_quality_score: float     # Score of best_source_feed
     description_quality_score: float
     low_information: bool
     run_id: str
@@ -703,38 +793,44 @@ class NormalizedEvent(BaseModel):
 ---
 
 ### 4. Deduplication Agent
+
 | | |
 |---|---|
 | Inputs | `list[NormalizedEvent]`, `run_id: str` |
 | Outputs | Deduplicated `list[NormalizedEvent]`; merge log |
-| LLM | Optional escalation via `llm.complete()` |
-| Deterministic | Yes for exact/fuzzy; probabilistic for escalation |
+| LLM | Optional escalation |
 | Log color | Blue |
 | Escalation | exact ID → fuzzy (`rapidfuzz`) → embedding → LLM |
+
+When records from multiple feeds are merged, the output carries `source_feeds` as the
+union of all source IDs, `source_count` as the total distinct sources, and
+`best_source_feed`/`source_quality_score` from the highest-quality source. Cross-feed
+coverage is preserved through to ranking as the `source_coverage` score component.
 
 ---
 
 ### 5. Description Quality Agent
+
 | | |
 |---|---|
 | Inputs | `list[NormalizedEvent]`, `run_id: str` |
 | Outputs | `list[NormalizedEvent]` with `description_quality_score`, `low_information` |
 | LLM | No (v1) |
-| Deterministic | Yes |
 | Log color | Yellow |
 | Threshold | `DESCRIPTION_QUALITY_THRESHOLD = 0.3` in `config.py` |
 
 ---
 
 ### 6. Talent Scout Agent
+
 | | |
 |---|---|
 | Inputs | `list[NormalizedEvent]`, `UserProfile`, `run_id: str` |
 | Outputs | `list[EnrichedEvent]` with `performers` |
 | LLM | Yes — via batch strategy |
 | Log color | Magenta |
-| Failure handling | Per-event: validation error → empty `performers` list; log warning |
-| Cache | Performer name → `PerformerInfo`; TTL 90 days |
+| Cache | `performer_cache` table; key: normalized performer name; TTL 90 days |
+| Failure handling | Per-event: validation error → empty `performers`; log warning |
 
 ```python
 class PerformerInfo(BaseModel):
@@ -757,32 +853,33 @@ class EnrichedEvent(NormalizedEvent):
 ---
 
 ### 7. Vibe Classifier Agent
+
 | | |
 |---|---|
 | Inputs | `list[EnrichedEvent]`, `run_id: str` |
 | Outputs | `list[EnrichedEvent]` with `vibe_tags` |
 | LLM | Yes — via batch strategy |
 | Log color | Magenta |
+| Cache | `vibe_cache` table; key: SHA-256(description + categories); TTL 14 days |
 | Failure handling | Per-event: validation error → empty `vibe_tags`; log warning |
-| Cache | Content hash → tag list; TTL 14 days |
 
 ---
 
 ### 8. Neighborhood Scout Agent
+
 | | |
 |---|---|
 | Inputs | `list[EnrichedEvent]`, `UserProfile`, `run_id: str` |
 | Outputs | `list[EnrichedEvent]` with `neighborhood_context` |
 | LLM | Yes — narrates geocoded POI data; via batch strategy |
 | Log color | Magenta |
-| Failure handling | Per-event: geocoding fail or low confidence → `None`; log warning |
-| Cache | Venue + city → context + confidence; TTL 30 days |
-| Mode A | Nominatim geocoding → POI list → LLM narration |
-| Mode B | Fallback: general neighborhood note only; no specific businesses |
+| Cache | `venue_cache` table; geo TTL 90 days, context TTL 30 days |
+| Failure handling | Per-event: geocoding fail or confidence < 0.5 → `None`; log warning |
 
 ---
 
 ### 9. User Preference Agent
+
 | | |
 |---|---|
 | Inputs | Onboarding data (first run); feedback signals (subsequent runs); `run_id` |
@@ -793,15 +890,15 @@ class EnrichedEvent(NormalizedEvent):
 ```python
 class UserProfile(BaseModel):
     user_id: str
-    name: str                          # From onboarding
-    email: str                         # Copy; source of truth is Modal Secret
+    name: str
+    email: str
     stated_interests: list[str]
     stated_dislikes: list[str]
     preferred_neighborhoods: list[str]
     max_travel_minutes: Optional[int]
     budget_ceiling_cents: Optional[int]
-    excluded_categories: list[str]     # Hard constraints
-    category_weights: dict[str, float] # Soft weights; decay-updated
+    excluded_categories: list[str]
+    category_weights: dict[str, float]
     vibe_preferences: list[str]
     created_at: datetime
     last_updated: datetime
@@ -811,20 +908,23 @@ class UserProfile(BaseModel):
 ---
 
 ### 10. Ranking Agent
+
 | | |
 |---|---|
 | Inputs | `list[EnrichedEvent]`, `UserProfile`, Chroma index, `run_id: str` |
 | Outputs | `list[RankedEvent]` |
-| LLM | Yes — explanations only via `llm.complete()` |
+| LLM | Yes — explanations only |
 | Deterministic | Yes — scoring is reproducible |
 | Log color | Green |
-| Failure handling | LLM explanation failure → generic fallback explanation; log warning |
+| Failure handling | Explanation failure → generic fallback; log warning |
 
 ```python
 class RankedEvent(BaseModel):
     event: EnrichedEvent
     score: float
     score_breakdown: dict[str, float]
+    # Keys: category_fit, vibe_fit, semantic_similarity, performer_affinity,
+    #       location, novelty, source_quality, source_coverage, description_quality
     explanation: str
     is_previously_recommended: bool
     novelty_penalty_applied: bool
@@ -835,6 +935,7 @@ class RankedEvent(BaseModel):
 ---
 
 ### 11. Sell-Out Risk Agent
+
 | | |
 |---|---|
 | Inputs | `list[RankedEvent]`, `run_id: str` |
@@ -846,21 +947,15 @@ class RankedEvent(BaseModel):
 ---
 
 ### 12. Recommendation Curator Agent (Allegra)
+
 | | |
 |---|---|
 | Inputs | `list[RankedEvent]`, `UserProfile`, history, `run_id: str` |
 | Outputs | `list[CuratedRecommendation]` (up to 10) |
 | LLM | Optional |
-| Deterministic | Yes — diversity rules, history filtering |
+| Deterministic | Yes |
 | Log color | Gold |
 | Sub-10 | Sends what passed; Allegra's note explains plainly |
-
-**Diversity rules (v1):**
-- Max 3 events per top-level category
-- Max 2 events per venue
-- At least 2 different dates
-- 1–2 wildcard slots (moderate fit, high novelty)
-- Last 4 weeks: score × 0.5; last 2 weeks: hard exclude
 
 ```python
 class CuratedRecommendation(BaseModel):
@@ -870,35 +965,39 @@ class CuratedRecommendation(BaseModel):
     score_breakdown: dict[str, float]
     explanation: str
     neighborhood_context: Optional[str]
-    sellout_risk: str                    # "low"|"medium"|"high"
+    sellout_risk: str
     sellout_urgency_note: Optional[str]
-    feedback_token: str                  # UUID
+    feedback_token: str
     is_wildcard: bool
     run_id: str
     recommended_at: datetime
 ```
 
+**Diversity rules (v1):** Max 3 events per category · Max 2 per venue · ≥2 different
+dates · 1–2 wildcard slots · Last 4 weeks: score × 0.5 · Last 2 weeks: hard exclude
+
 ---
 
 ### 13. Email Composer Agent
+
 | | |
 |---|---|
 | Inputs | `list[CuratedRecommendation]`, `UserProfile`, `run_id: str` |
 | Outputs | Rendered HTML; Resend send confirmation |
-| LLM | Yes — via `llm.complete()` |
+| LLM | Yes |
 | Log color | Gold |
-| Email address | Read from `USER_EMAIL` Modal Secret |
-| UAT | Subject: `[UAT {run_id}] Your picks this week` |
+| Email address | `USER_EMAIL` Modal Secret |
 | Failure handling | Resend failure → `LLMInfrastructureError`; pipeline halts |
 
 ---
 
 ### 14. Evaluation Agent
+
 | | |
 |---|---|
 | Inputs | Run logs, recommendations, feedback, `UserProfile`, `run_id` |
 | Outputs | Quality report; flagged issues |
-| LLM | Yes — smaller model via `llm.complete()` |
+| LLM | Yes — smaller model |
 | Log color | Red |
 
 ---
@@ -907,13 +1006,13 @@ class CuratedRecommendation(BaseModel):
 
 | Store | Volume | Format | Owner | Retention |
 |---|---|---|---|---|
-| Global feeds | repo | `config/global_feeds.yaml` | Operator | Permanent |
-| User feeds | repo | `config/user_feeds.yaml` | User | Permanent |
+| Global feeds | repo | YAML | Operator | Permanent |
+| User feeds | repo | YAML | User | Permanent |
 | User profile | `vol-profiles` | JSON | User Preference Agent | Permanent |
 | Chroma index | `vol-chroma` | Chroma DB | Ranking Agent | Permanent |
 | Feedback events | `vol-feedback` | SQLite | Feedback Service | Permanent |
 | Recommendation history | `vol-history` | SQLite | Curator Agent | Permanent |
-| Enrichment + geocoding cache | `vol-cache` | SQLite | Enrichment agents | TTL-based |
+| All caches | `vol-cache` | SQLite (5 tables) | Cache Service | TTL-based |
 | Pipeline state | `vol-pipeline-state` | JSON | Orchestrator | Cleared post-run |
 | Run logs | `vol-logs` | JSONL | All agents | 90 days rolling |
 
@@ -943,30 +1042,30 @@ scene-scout/
 ├── output/                           ← UAT output; gitignored
 ├── scene_scout/
 │   ├── __init__.py
-│   ├── cli.py                        ← UAT entry point
-│   ├── orchestrator.py               ← run_id; PipelineState; agent sequencing
-│   ├── config.py                     ← all named constants and env vars
-│   ├── curator_config.py             ← CuratorConfig; Allegra
+│   ├── cli.py
+│   ├── orchestrator.py               ← run_id; PipelineState; seen_entries check
+│   ├── config.py
+│   ├── curator_config.py
 │   ├── agents/
-│   │   ├── feed_scout.py
+│   │   ├── feed_scout.py             ← ETag/304 + FeedStatus.UNCHANGED
 │   │   ├── event_extraction.py
-│   │   ├── event_normalization.py
-│   │   ├── deduplication.py
+│   │   ├── event_normalization.py    ← source_feeds, source_count, best_source_feed
+│   │   ├── deduplication.py          ← multi-source merge logic
 │   │   ├── description_quality.py
 │   │   ├── talent_scout.py
 │   │   ├── vibe_classifier.py
 │   │   ├── neighborhood_scout.py
 │   │   ├── user_preference.py
-│   │   ├── ranking.py
+│   │   ├── ranking.py                ← source_coverage score component
 │   │   ├── sellout_risk.py
 │   │   ├── recommendation_curator.py
 │   │   ├── email_composer.py
 │   │   └── evaluation.py
 │   ├── models/
-│   │   ├── feed.py
-│   │   ├── event.py
+│   │   ├── feed.py                   ← FeedConfig.cursor; FeedStatus.UNCHANGED
+│   │   ├── event.py                  ← NormalizedEvent source provenance fields
 │   │   ├── enrichment.py
-│   │   ├── ranking.py
+│   │   ├── ranking.py                ← source_coverage in score_breakdown
 │   │   └── user.py
 │   ├── prompts/
 │   │   ├── curator_voice.txt
@@ -979,19 +1078,19 @@ scene-scout/
 │   │   ├── user_preference_parse.txt
 │   │   └── vibe_classifier.txt
 │   ├── services/
-│   │   ├── batch.py                  ← BatchStrategy + implementations
-│   │   ├── cache.py                  ← enrichment + geocoding cache
-│   │   ├── chroma.py                 ← Chroma client + embedding
-│   │   ├── feedback.py               ← feedback signal store
-│   │   ├── geocoding.py              ← Nominatim wrapper + cache
-│   │   ├── history.py                ← recommendation history store
-│   │   ├── llm.py                    ← centralized LLM service
-│   │   └── prompt_loader.py          ← Jinja2 render_prompt()
+│   │   ├── batch.py
+│   │   ├── cache.py                  ← seen_entries, feed_etags, all enrichment caches
+│   │   ├── chroma.py
+│   │   ├── feedback.py
+│   │   ├── geocoding.py
+│   │   ├── history.py
+│   │   ├── llm.py
+│   │   └── prompt_loader.py
 │   └── logging/
-│       └── logger.py                 ← rich logger; color-coded per agent
+│       └── logger.py
 └── tests/
     ├── fixtures/
-    │   └── golden/                   ← golden file fixtures for prompt regression
+    │   └── golden/
     ├── agents/
     ├── models/
     └── services/
@@ -1001,8 +1100,8 @@ scene-scout/
 
 ## Design Principles
 
-1. Separate the scaffold from the intelligence — interface and implementation are independent.
-2. Build the skeleton before the intelligence — pipeline first, smart agents second.
+1. Separate the scaffold from the intelligence.
+2. Build the skeleton before the intelligence.
 3. LiteLLM is the only LLM interface — no direct provider SDK imports in agents.
 4. All LLM calls go through `services/llm.py` — one entry point, consistent behavior.
 5. Prompts are Jinja2 templates in files — versioned independently of agent code.
@@ -1011,7 +1110,9 @@ scene-scout/
 8. Neighborhood Scout narrates facts it is given — it does not recall geography.
 9. Scoring is deterministic; explanation is generative — never conflate them.
 10. UAT sends a real email — if it didn't arrive, the test didn't pass.
-11. Log with intent — color-coded, structured, traceable by `run_id`.
-12. NumPy-style docstrings on all public functions and classes.
-13. Add tests where they protect core behavior; golden files for prompt regression.
-14. Every major component must answer: "Is this working?"
+11. Multiple feed copies of the same event are acceptable — deduplication is downstream, not at ingestion.
+12. `seen_entries` cache key includes `feed_id` — source provenance is never collapsed at the cache layer.
+13. Log with intent — color-coded, structured, traceable by `run_id`.
+14. NumPy-style docstrings on all public functions and classes.
+15. Add tests where they protect core behavior; golden files for prompt regression.
+16. Every major component must answer: "Is this working?"
