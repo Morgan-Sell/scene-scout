@@ -1,12 +1,12 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "scene-scout"
 version = "0.1.0"
 description = "A personalized event discovery agent"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "feedparser>=6.0",       # RSS/Atom parsing — deterministic, spec-compliant
     "pydantic>=2.0",         # Schema definition and validation
