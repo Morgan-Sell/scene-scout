@@ -13,6 +13,7 @@ dependencies = [
     "pyyaml>=6.0",           # Feed config file parsing
     "httpx>=0.27",           # HTTP client for feed fetching (async-capable)
     "python-dotenv>=1.0",    # Environment variable loading
+    "rich>=13.0",            # Color-coded per-agent terminal logging
 ]
 
 [project.optional-dependencies]
