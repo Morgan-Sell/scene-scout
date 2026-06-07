@@ -47,3 +47,14 @@ def load_feed_configs(path: Path = _FEEDS_CONFIG_PATH) -> list[FeedConfig]:
 def is_dry_run() -> bool:
     """Return True if the pipeline should run without sending email."""
     return os.getenv("DRY_RUN", "false").lower() == "true"
+
+
+# LiteLLM configuration — provider-swappable via LLM_MODEL only.
+LLM_MODEL: str = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
+LLM_API_KEY: str | None = os.getenv("LLM_API_KEY")
+LLM_API_BASE: str | None = os.getenv("LLM_API_BASE")
+LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
+LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "3"))
+LLM_RETRY_BASE_DELAY_SECONDS: float = float(
+    os.getenv("LLM_RETRY_BASE_DELAY_SECONDS", "1.0")
+)

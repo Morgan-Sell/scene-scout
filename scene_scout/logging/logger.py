@@ -40,8 +40,8 @@ AGENT_COLORS: dict[str, tuple[str, str]] = {
     "recommendation_curator": ("RECOMMENDATION CURATOR", "gold1"),
     "email_composer": ("EMAIL COMPOSER", "gold1"),
     "evaluation": ("EVALUATION", "red"),
-    "cache": ("CACHE", "dim white"),
-    "llm": ("LLM SERVICE", "dim white"),
+    "cache": ("CACHE", "white", True),
+    "llm": ("LLM SERVICE", "white", True),
 }
 
 _LEVEL_STYLES: dict[int, Style] = {
@@ -106,12 +106,13 @@ class AgentLogger:
     def __init__(self, agent_name: str, run_id: str | None = None) -> None:
         self.agent_name = agent_name
         self.run_id = run_id
-        display_name, color = AGENT_COLORS.get(
+        entry = AGENT_COLORS.get(
             agent_name,
             (agent_name.upper().replace("_", " "), "white"),
         )
-        self._display_name = display_name
-        self._color = color
+        self._display_name = entry[0]
+        self._color = entry[1]
+        self._dim = entry[2] if len(entry) > 2 else False
         self._console = Console(stderr=True, force_terminal=True)
         self._level = logging.INFO
 
@@ -123,6 +124,8 @@ class AgentLogger:
     @property
     def color(self) -> str:
         """Rich color name assigned to this agent."""
+        if self._dim:
+            return "dim white"
         return self._color
 
     def set_run_id(self, run_id: str) -> None:
@@ -173,7 +176,7 @@ class AgentLogger:
 
         formatted = message % args if args else message
         prefix = f"[{self._display_name}]"
-        agent_style = Style(color=self._color, bold=True)
+        agent_style = Style(color=self._color, bold=not self._dim, dim=self._dim)
         level_style = _LEVEL_STYLES.get(level, Style())
 
         self._console.print(
