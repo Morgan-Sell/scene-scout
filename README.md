@@ -48,4 +48,10 @@ See [`docs/architecture.md`](docs/architecture.md) for full agent specs, schemas
 
 ## Status
 
-Early development. See architecture document for milestone plan.
+Early development. See [`docs/project_plan.md`](docs/project_plan.md) for the milestone
+plan and [`docs/architecture.md`](docs/architecture.md) for full specs.
+
+**Testing & delivery:** Unit tests run locally with `uv run pytest`. GitHub Actions CI
+(Phase 2.10) will gate PRs. Full UAT with real email is a manual release check; use
+`--dry-run` for day-to-day pipeline iteration. Production deploy targets Modal
+(Phase 11) — not yet implemented.

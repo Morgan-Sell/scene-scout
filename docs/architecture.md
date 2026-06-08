@@ -377,6 +377,10 @@ USER_NAME      →  Modal secret: user       ← used in email salutation
 GRADIO_PASSWORD → Modal secret: gradio
 ```
 
+Deploy is via Modal (Phase 11), not by running Docker Compose in production. GitHub
+Actions CI (Phase 2.10) runs `pytest` on every PR; CD (Phase 11.2) runs `modal deploy`
+on merge/tag. See **CI/CD** under Testing Strategy.
+
 ### Persistent Volumes — One Per Store
 
 | Volume | Contents | Owner |
@@ -661,6 +665,64 @@ layer → final top 10. On top of scores, not instead of them.
 | Integration tests | Agent-to-agent data flow; cache behavior | Mocked LLM; real SQLite | CI |
 | Prompt regression | LLM output quality; schema validity | Golden file fixtures | Manually |
 | UAT | Full end-to-end pipeline; real email | Live API calls | Manually |
+
+**CI scope (Phase 2.10):** `uv sync --all-extras` + `pytest` on every push/PR. Tests
+use mocked LiteLLM and HTTP (respx); autouse fixtures in `tests/conftest.py` isolate
+runtime volumes. No secrets required in GitHub Actions for the default CI job.
+
+**Not in CI:** prompt regression (golden files, manual), full UAT with real email,
+Modal deploy. These are manual or release-gate activities — see CI/CD below.
+
+---
+
+## CI/CD
+
+SceneScout separates **continuous integration** (merge gates), **continuous delivery**
+(deploy code to Modal), and **acceptance testing** (full UAT with real email).
+
+### What runs where
+
+| Trigger | Action | Workflow |
+|---|---|---|
+| PR / push to `main` | CI: install deps, run `pytest` | `.github/workflows/ci.yml` (Phase 2.10) |
+| Merge to `main` (optional) | CD: `modal deploy` to staging | `.github/workflows/deploy.yml` (Phase 11.2) |
+| Release tag | CD: `modal deploy` to production | Phase 11.2 |
+| Pre-release (human) | Full UAT without `--dry-run`; confirm inbox | Not automated |
+
+### Local dev vs production deploy
+
+| Environment | Mechanism | Purpose |
+|---|---|---|
+| **Local** | `uv run`, `docker-compose up` (Phase 2.6) | Day-to-day development; volume mounts mirror prod layout |
+| **Production** | Modal — scheduled pipeline + Gradio endpoint (Phase 11) | Cron job, secrets, persistent volumes |
+
+Docker Compose is **dev parity**, not production CD. Do not conflate `docker-compose up`
+with `modal deploy` — same codebase, different entrypoints, secrets, and schedulers.
+
+### UAT modes and release gate
+
+```bash
+# Dev iteration — pipeline + preview, no email send
+uv run python -m scene_scout.cli uat --prompt "..." --dry-run
+
+# Release gate — full end-to-end including real email (manual)
+uv run python -m scene_scout.cli uat --prompt "..."
+```
+
+Architecture rule: **if the email did not arrive, the UAT did not pass.** That check
+stays manual (or post-deploy operator step), not a GitHub Actions job on every PR.
+
+### Secrets
+
+| Secret location | Used by |
+|---|---|
+| `.env` (local, gitignored) | Local dev; `DRY_RUN=true` by default in `.env.example` |
+| GitHub Actions secrets | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` for CD only (Phase 11) |
+| Modal Secrets | `LLM_API_KEY`, `RESEND_API_KEY`, `USER_EMAIL`, `GRADIO_PASSWORD` at runtime |
+
+Never commit API keys. CI pytest job must pass without them.
+
+See `docs/project_plan.md` — Phase 2.10 (CI), Phase 11 (Modal deploy & CD).
 
 ---
 
@@ -1022,6 +1084,10 @@ dates · 1–2 wildcard slots · Last 4 weeks: score × 0.5 · Last 2 weeks: har
 
 ```
 scene-scout/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                    ← pytest on PR/push (Phase 2.10)
+│       └── deploy.yml                ← modal deploy on merge/tag (Phase 11.2)
 ├── docker/
 │   ├── pipeline/Dockerfile
 │   └── web/Dockerfile
@@ -1034,6 +1100,7 @@ scene-scout/
 │   └── user_feeds.yaml
 ├── docs/
 │   ├── architecture.md
+│   ├── deployment.md                 ← Modal secrets, CD triggers (Phase 11)
 │   ├── project_plan.md
 │   └── diagrams/
 │       ├── diagrams.md
@@ -1043,6 +1110,8 @@ scene-scout/
 ├── scene_scout/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── gradio_app.py
+│   ├── modal_app.py                  ← Modal entrypoint (Phase 11.1)
 │   ├── orchestrator.py               ← run_id; PipelineState; seen_entries check
 │   ├── config.py
 │   ├── curator_config.py
