@@ -9,19 +9,9 @@ import json
 import logging
 from pathlib import Path
 
-import pytest
-
 from scene_scout.logging import get_logger
 from scene_scout.logging.logger import AGENT_COLORS, AgentLogger
-
-TEST_RUN_ID = "20250606-143022"
-
-
-@pytest.fixture
-def logs_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect vol-logs to a temporary directory for isolation."""
-    monkeypatch.setenv("VOL_LOGS_DIR", str(tmp_path))
-    return tmp_path
+from tests.conftest import TEST_RUN_ID
 
 
 def test_get_logger_returns_agent_logger() -> None:
@@ -75,7 +65,7 @@ def test_all_documented_agents_have_color_assignments() -> None:
 
 def test_jsonl_written_with_run_id(logs_dir: Path) -> None:
     logger = get_logger("feed_scout", run_id=TEST_RUN_ID)
-    logger.info("Feed OK: Test Feed — 2 entries fetched")
+    logger.info("Feed OK: Mr. Mertle's Events — 2 entries fetched")
 
     log_file = logs_dir / f"{TEST_RUN_ID}.jsonl"
     assert log_file.exists()
@@ -84,7 +74,7 @@ def test_jsonl_written_with_run_id(logs_dir: Path) -> None:
     assert entry["run_id"] == TEST_RUN_ID
     assert entry["agent"] == "feed_scout"
     assert entry["level"] == "INFO"
-    assert entry["message"] == "Feed OK: Test Feed — 2 entries fetched"
+    assert entry["message"] == "Feed OK: Mr. Mertle's Events — 2 entries fetched"
     assert entry["data"] == {}
     assert "timestamp" in entry
 
@@ -93,13 +83,13 @@ def test_jsonl_includes_optional_data(logs_dir: Path) -> None:
     logger = get_logger("ranking", run_id=TEST_RUN_ID)
     logger.info(
         "Scored event",
-        data={"event_id": "abc123", "score": 0.87},
+        data={"event_id": "the-great-bambino", "score": 0.87},
     )
 
     entry = json.loads(
         (logs_dir / f"{TEST_RUN_ID}.jsonl").read_text(encoding="utf-8").strip()
     )
-    assert entry["data"] == {"event_id": "abc123", "score": 0.87}
+    assert entry["data"] == {"event_id": "the-great-bambino", "score": 0.87}
 
 
 def test_set_run_id_enables_jsonl(logs_dir: Path) -> None:
@@ -134,10 +124,10 @@ def test_debug_respects_level_filter(logs_dir: Path) -> None:
 
 def test_message_formatting_with_args(logs_dir: Path) -> None:
     logger = get_logger("feed_scout", run_id=TEST_RUN_ID)
-    logger.warning("Feed failed: %s — status=%s", "Broken Feed", "unreachable")
+    logger.warning("Feed failed: %s — status=%s", "The Beast's Yard RSS", "unreachable")
 
     entry = json.loads(
         (logs_dir / f"{TEST_RUN_ID}.jsonl").read_text(encoding="utf-8").strip()
     )
-    assert entry["message"] == "Feed failed: Broken Feed — status=unreachable"
+    assert entry["message"] == "Feed failed: The Beast's Yard RSS — status=unreachable"
     assert entry["level"] == "WARNING"

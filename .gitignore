@@ -217,5 +217,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# SceneScout runtime volumes (local dev)
+vol-logs/
+
 
 .DS_Store

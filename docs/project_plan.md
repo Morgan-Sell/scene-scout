@@ -533,7 +533,28 @@ Standards:
 - rich logger via get_logger(agent_name) — no print statements
 - Degrade gracefully at record level; raise on infrastructure failure
 - seen_entries cache key always includes feed_id
+- Shared pytest fixtures in tests/conftest.py; Sandlot-themed test strings
 ```
 
 Complete and verify each subphase before starting the next.
 Do not combine subphases in a single Cursor instruction.
+
+---
+
+## Testing Conventions
+
+Shared pytest fixtures and constants live in `tests/conftest.py`. Individual test
+modules import from there rather than duplicating setup.
+
+- **`tests/conftest.py`** — cross-cutting fixtures used by multiple test files
+  (e.g. `logs_dir`, autouse `VOL_LOGS_DIR` isolation). Domain-specific helpers
+  (RSS payloads, LLM mocks) stay in their test module until a second consumer
+  appears.
+- **Fixture strings** — use funny references to *The Sandlot* (1993). Test run IDs,
+  feed names, and sample event titles should be obviously fake and never
+  confusable with production data (e.g. `TEST_RUN_ID = "youre-killing-me-smalls"`).
+- **`vol-logs/` isolation** — an autouse fixture redirects `VOL_LOGS_DIR` to a
+  temp directory so tests never write JSONL into the real `vol-logs/` volume.
+- **`vol-logs/` is gitignored** — runtime pipeline output, not source.
+
+---
