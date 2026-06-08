@@ -15,6 +15,7 @@ dependencies = [
     "python-dotenv>=1.0",    # Environment variable loading
     "rich>=13.0",            # Color-coded per-agent terminal logging
     "litellm>=1.0",          # Unified LLM provider interface
+    "jinja2>=3.0",           # Prompt template rendering
 ]
 
 [project.optional-dependencies]
@@ -30,3 +31,6 @@ asyncio_mode = "auto"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["scene_scout*"]
+
+[tool.setuptools.package-data]
+scene_scout = ["prompts/*.txt"]
