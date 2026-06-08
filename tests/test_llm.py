@@ -19,8 +19,7 @@ from scene_scout.services.llm import (
     LLMValidationError,
     complete,
 )
-
-TEST_RUN_ID = "20250606-143022"
+from tests.conftest import TEST_RUN_ID
 
 
 class SampleResponse(BaseModel):
@@ -46,17 +45,10 @@ def _mock_response(
     )
 
 
-@pytest.fixture
-def logs_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect vol-logs to a temporary directory for isolation."""
-    monkeypatch.setenv("VOL_LOGS_DIR", str(tmp_path))
-    return tmp_path
-
-
 @pytest.mark.asyncio
 async def test_complete_returns_validated_model() -> None:
     mock_completion = AsyncMock(
-        return_value=_mock_response('{"name": "test", "value": 42}')
+        return_value=_mock_response('{"name": "squints", "value": 42}')
     )
     with patch(
         "scene_scout.services.llm.litellm.acompletion",
@@ -70,13 +62,13 @@ async def test_complete_returns_validated_model() -> None:
             agent_name="event_extraction",
         )
 
-    assert result == SampleResponse(name="test", value=42)
+    assert result == SampleResponse(name="squints", value=42)
     mock_completion.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_complete_parses_json_code_fence() -> None:
-    content = '```json\n{"name": "fenced", "value": 7}\n```'
+    content = '```json\n{"name": "ham-porter", "value": 7}\n```'
     with patch(
         "scene_scout.services.llm.litellm.acompletion",
         AsyncMock(return_value=_mock_response(content)),
@@ -89,7 +81,7 @@ async def test_complete_parses_json_code_fence() -> None:
             agent_name="event_extraction",
         )
 
-    assert result.name == "fenced"
+    assert result.name == "ham-porter"
     assert result.value == 7
 
 
@@ -170,7 +162,7 @@ async def test_complete_retries_on_transient_error_then_succeeds() -> None:
                 llm_provider="anthropic",
                 model="claude-sonnet-4-6",
             ),
-            _mock_response('{"name": "recovered", "value": 1}'),
+            _mock_response('{"name": "benny-the-jet", "value": 1}'),
         ]
     )
     with (
@@ -191,7 +183,7 @@ async def test_complete_retries_on_transient_error_then_succeeds() -> None:
             agent_name="event_extraction",
         )
 
-    assert result.name == "recovered"
+    assert result.name == "benny-the-jet"
     assert mock_completion.await_count == 2
 
 
@@ -201,7 +193,7 @@ async def test_complete_logs_token_usage(logs_dir: Path) -> None:
         "scene_scout.services.llm.litellm.acompletion",
         AsyncMock(
             return_value=_mock_response(
-                '{"name": "logged", "value": 3}',
+                '{"name": "yeah-yeah", "value": 3}',
                 prompt_tokens=100,
                 completion_tokens=25,
             )

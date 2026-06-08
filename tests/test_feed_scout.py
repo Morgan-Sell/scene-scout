@@ -19,8 +19,7 @@ from httpx import Response
 from scene_scout.agents import feed_scout
 from scene_scout.config import load_feed_configs
 from scene_scout.models.feed import FeedConfig, FeedStatus
-
-TEST_RUN_ID = "20250606-120000"
+from tests.conftest import TEST_RUN_ID
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -29,23 +28,23 @@ TEST_RUN_ID = "20250606-120000"
 MINIMAL_RSS = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
-    <title>Test Events Feed</title>
+    <title>Mr. Mertle's Events Feed</title>
     <link>https://example.com</link>
-    <description>A test feed</description>
+    <description>Events from the sandlot crew</description>
     <item>
-      <title>Jazz Night at the Echo</title>
-      <link>https://example.com/jazz-night</link>
-      <description>An intimate jazz evening featuring local quartet.</description>
+      <title>The Great Bambino Night</title>
+      <link>https://example.com/great-bambino-night</link>
+      <description>Legends of the sandlot retell the Babe Ruth story under the floodlights.</description>
       <pubDate>Fri, 06 Jun 2025 20:00:00 +0000</pubDate>
-      <category>Music</category>
-      <category>Jazz</category>
+      <category>Baseball</category>
+      <category>Legends</category>
     </item>
     <item>
-      <title>Sunday Film Screening</title>
-      <link>https://example.com/film-screening</link>
-      <description>Independent short films from LA filmmakers.</description>
+      <title>Pool Party at the Rec Center</title>
+      <link>https://example.com/pool-party-rec-center</link>
+      <description>Squints-approved summer hangout at the community pool.</description>
       <pubDate>Sun, 08 Jun 2025 18:00:00 +0000</pubDate>
-      <category>Film</category>
+      <category>Pool</category>
     </item>
   </channel>
 </rss>"""
@@ -66,7 +65,7 @@ def _make_config(
 ) -> FeedConfig:
     return FeedConfig(
         id=feed_id,
-        name="Test Feed",
+        name="Mr. Mertle's Events Feed",
         url=url,
         city="Los Angeles",
         source_quality_score=0.8,
@@ -124,10 +123,10 @@ async def test_raw_entry_fields_preserved_faithfully():
     entries, _ = await feed_scout.run([config], run_id=TEST_RUN_ID)
     first = entries[0]
 
-    assert first.title == "Jazz Night at the Echo"
-    assert first.link == "https://example.com/jazz-night"
-    assert "jazz evening" in first.description.lower()
-    assert "Music" in first.categories or "Jazz" in first.categories
+    assert first.title == "The Great Bambino Night"
+    assert first.link == "https://example.com/great-bambino-night"
+    assert "babe ruth" in first.description.lower()
+    assert "Baseball" in first.categories or "Legends" in first.categories
     assert isinstance(first.published_raw, str)  # Not parsed — preserved as string
     assert first.feed_id == "test_feed"
     assert first.run_id == TEST_RUN_ID
