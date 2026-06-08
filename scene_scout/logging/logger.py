@@ -235,3 +235,15 @@ def get_logger(agent_name: str, run_id: str | None = None) -> AgentLogger:
     if run_id is not None:
         logger.set_run_id(run_id)
     return logger
+
+
+def configure_log_level(level: int) -> None:
+    """Set the minimum log level on all cached agent loggers.
+
+    Parameters
+    ----------
+    level : int
+        Standard ``logging`` level constant (e.g. ``logging.DEBUG``).
+    """
+    for logger in _logger_cache.values():
+        logger.set_level(level)

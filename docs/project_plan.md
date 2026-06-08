@@ -134,6 +134,16 @@ logged per cache type per run. All interfaces unit tested including TTL expiry b
 `docs/diagrams/data_flow.mmd`
 **Done when:** Both diagrams render correctly in Cursor via `diagrams.md` preview.
 
+### 2.10 — GitHub Actions CI
+**Files:** `.github/workflows/ci.yml`
+**Done when:** Workflow runs on every push and pull request to `main`. Steps:
+`uv sync --all-extras`, then `pytest`. No live API keys required (tests use mocked
+LLM and HTTP). Full UAT with real email is **not** run in CI — see Testing Conventions
+and Phase 11.
+
+**Rationale:** Automate deterministic unit and integration tests on every PR. Matches
+the testing strategy in `docs/architecture.md` (CI runs mocked tests; UAT stays manual).
+
 ---
 
 ## Phase 3 — Event Extraction
@@ -485,6 +495,43 @@ and how to decide when a prompt change is an improvement.
 
 ---
 
+## Phase 11 — Deployment & Continuous Delivery
+*Goal: Production deployment on Modal with a clear CI/CD split. CI gates merges;
+CD deploys code; full email UAT remains a manual release check.*
+
+Phase 11 depends on Phase 7 (working pipeline and email path). Subphases 11.1 can
+start earlier (Phase 2.10 covers CI alone). Do not block Phase 3–10 on Modal deploy.
+
+### 11.1 — Modal Application Skeleton
+**Files:** `scene_scout/modal_app.py`, `docs/deployment.md`
+**Done when:** `modal deploy` publishes a stub app: scheduled pipeline function (cron),
+Gradio web endpoint placeholder, and documented Modal Secrets mapping (`llm`, `resend`,
+`user`, `gradio`). Persistent volumes (`vol-cache`, `vol-logs`, `vol-pipeline-state`,
+etc.) mounted per `docs/architecture.md`. Local `docker-compose` (Phase 2.6) remains
+the dev parity path — it is not production CD.
+
+### 11.2 — CD Workflow (Staging / Production)
+**Files:** `.github/workflows/deploy.yml`, `docs/deployment.md` (extend)
+**Done when:** Documented deploy triggers:
+- **PR / push to `main`:** CI only (`ci.yml` from Phase 2.10) — no auto-deploy, no
+  auto-email.
+- **Merge to `main` (optional):** deploy to Modal staging via `modal deploy` using
+  `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` GitHub secrets.
+- **Release tag:** deploy to Modal production; operator runs manual full UAT
+  (`uv run python -m scene_scout.cli uat --prompt "..."` without `--dry-run`) and
+  confirms email arrival before considering the release complete.
+
+CD does **not** run full UAT with live email on every merge (flaky, costly, requires
+live keys). `--dry-run` UAT is for dev iteration; real-email UAT is the human release
+gate per `docs/architecture.md`.
+
+### 11.3 — Deploy Smoke Test
+**Files:** `.github/workflows/deploy.yml` (extend), `tests/smoke/test_modal_stub.py`
+**Done when:** Post-deploy job verifies Modal app is reachable (health check or stub
+invoke). Does not send email or call LLM providers.
+
+---
+
 ## Open Items
 
 | Item | Status | Phase |
@@ -508,6 +555,10 @@ and how to decide when a prompt change is an improvement.
 | Feedback endpoint rate limiting | Known gap; acceptable for single-user | Post-launch |
 | LLM model for Evaluation Agent | Open — smaller model TBD | 9 |
 | Sell-out risk ML model design | Defer to Phase 9 | 9 |
+| GitHub Actions CI (pytest on PR) | Planned | 2.10 |
+| Modal deploy + CD workflow | Planned — after Phase 7 | 11 |
+| Full UAT in CI | ✗ Not planned — manual release gate | 7, 11 |
+| Docker Compose vs Modal CD | ✓ Separate — Compose is local dev; Modal is prod | 2.6, 11 |
 
 ---
 
@@ -556,5 +607,20 @@ modules import from there rather than duplicating setup.
 - **`vol-logs/` isolation** — an autouse fixture redirects `VOL_LOGS_DIR` to a
   temp directory so tests never write JSONL into the real `vol-logs/` volume.
 - **`vol-logs/` is gitignored** — runtime pipeline output, not source.
+- **`vol-pipeline-state/` and `output/` are gitignored** — same rule.
+
+### CI vs UAT vs CD
+
+| Activity | When | Requires live API keys? | Sends email? |
+|---|---|---|---|
+| **`pytest` (CI)** | Every PR / push via GitHub Actions (Phase 2.10) | No — mocked LLM + HTTP | No |
+| **UAT `--dry-run`** | Local dev, Gradio Dev Section | Optional (pipeline may skip LLM until wired) | No — writes `email_preview.html` (Phase 7) |
+| **Full UAT** | Manual, pre-release | Yes — LLM, Resend, feeds | Yes — real email to `USER_EMAIL` |
+| **Modal CD** | Merge/tag deploy (Phase 11) | Yes — in Modal Secrets, not in repo | Only on scheduled prod run, not on every deploy |
+
+**Why decouple email from dry-run:** Most pipeline logic (feeds → rank → compose HTML)
+can be validated without Resend. Full email delivery is an external side effect — keep
+it as the explicit release gate, not a per-PR CI step. See `docs/architecture.md —
+UAT Mode` and `CI/CD`.
 
 ---
