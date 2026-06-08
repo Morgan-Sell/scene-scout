@@ -5,5 +5,11 @@ from scene_scout.services.llm import (
     LLMValidationError,
     complete,
 )
+from scene_scout.services.prompt_loader import render_prompt
 
-__all__ = ["LLMInfrastructureError", "LLMValidationError", "complete"]
+__all__ = [
+    "LLMInfrastructureError",
+    "LLMValidationError",
+    "complete",
+    "render_prompt",
+]
