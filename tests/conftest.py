@@ -29,6 +29,17 @@ def _isolate_vol_logs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return log_dir
 
 
+@pytest.fixture(autouse=True)
+def _isolate_vol_pipeline_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Redirect vol-pipeline-state to a temp dir for every test."""
+    state_dir = tmp_path / "squints-pipeline-locker"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("VOL_PIPELINE_STATE_DIR", str(state_dir))
+    return state_dir
+
+
 @pytest.fixture
 def logs_dir(_isolate_vol_logs: Path) -> Path:
     """Temp directory where JSONL run logs are written during tests."""

@@ -219,6 +219,7 @@ __marimo__/
 
 # SceneScout runtime volumes (local dev)
 vol-logs/
+vol-pipeline-state/
 
 
 .DS_Store
