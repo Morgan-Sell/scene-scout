@@ -1,0 +1,33 @@
+{
+  "fixture_id": "sparse_entry",
+  "description": "Minimal RSS item — title and link only; optional fields absent.",
+  "entry": {
+    "feed_id": "sandlot-pickup-league",
+    "feed_name": "Mr. Mertle's Events Feed",
+    "source_url": "https://example.com/sandlot-feed.xml",
+    "run_id": "youre-killing-me-smalls",
+    "title": "Pool Party at the Rec Center",
+    "link": "https://example.com/pool-party-rec-center",
+    "description": null,
+    "published_raw": null,
+    "author": null,
+    "categories": [],
+    "enclosure_url": null,
+    "fetched_at": "2025-06-06T12:00:00+00:00"
+  },
+  "llm_output": {
+    "title": "Pool Party at the Rec Center",
+    "date": null,
+    "time": null,
+    "venue": null,
+    "neighborhood": null,
+    "city": "Los Angeles",
+    "url": "https://example.com/pool-party-rec-center",
+    "price": null,
+    "description": null,
+    "categories": [],
+    "is_event": true,
+    "extraction_confidence": 0.35
+  },
+  "include_in_results": true
+}

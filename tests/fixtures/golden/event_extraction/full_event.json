@@ -1,0 +1,33 @@
+{
+  "fixture_id": "full_event",
+  "description": "Standard event with complete RSS fields (title, link, description, pubDate, author, categories).",
+  "entry": {
+    "feed_id": "sandlot-pickup-league",
+    "feed_name": "Mr. Mertle's Events Feed",
+    "source_url": "https://example.com/sandlot-feed.xml",
+    "run_id": "youre-killing-me-smalls",
+    "title": "The Great Bambino Night",
+    "link": "https://example.com/great-bambino-night",
+    "description": "Sandlot legends retell the Babe Ruth story under the floodlights.",
+    "published_raw": "Fri, 06 Jun 2025 20:00:00 +0000",
+    "author": "Ham Porter",
+    "categories": ["Baseball", "Legends"],
+    "enclosure_url": null,
+    "fetched_at": "2025-06-06T12:00:00+00:00"
+  },
+  "llm_output": {
+    "title": "The Great Bambino Night",
+    "date": "Fri, 06 Jun 2025",
+    "time": "8:00 PM",
+    "venue": "The Sandlot",
+    "neighborhood": "San Fernando Valley",
+    "city": "Los Angeles",
+    "url": "https://example.com/great-bambino-night",
+    "price": "Free",
+    "description": "Legends retell the Babe Ruth story under the floodlights.",
+    "categories": ["Baseball", "Legends"],
+    "is_event": true,
+    "extraction_confidence": 0.92
+  },
+  "include_in_results": true
+}
