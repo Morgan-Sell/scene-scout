@@ -78,8 +78,7 @@ def test_render_prompt_raises_undefined_error_for_missing_variable(
         )
 
 
-def test_render_prompt_static_template_without_variables() -> None:
-    """Prompts with no Jinja2 variables render as-is."""
-    result = render_prompt("event_extraction")
-    assert "event extraction specialist" in result.lower()
-    assert "is_event" in result
+def test_render_prompt_event_extraction_requires_entry() -> None:
+    """Event extraction template injects a RawFeedEntry."""
+    with pytest.raises(jinja2.UndefinedError):
+        render_prompt("event_extraction")

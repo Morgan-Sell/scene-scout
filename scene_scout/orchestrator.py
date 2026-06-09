@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from scene_scout.agents import event_extraction
+from scene_scout.agents import event_extraction
 from scene_scout.config import vol_pipeline_state_dir
 from scene_scout.logging import get_logger
 
@@ -201,10 +203,6 @@ async def _stub_feed_scout(run_id: str) -> tuple[list[Any], list[Any]]:
     return [], []
 
 
-async def _stub_event_extraction(entries: list[Any], run_id: str) -> list[Any]:
-    """Stub for Event Extraction Agent."""
-    return []
-
 
 async def _stub_event_normalization(candidates: list[Any], run_id: str) -> list[Any]:
     """Stub for Event Normalization Agent."""
@@ -290,7 +288,7 @@ class Orchestrator:
         entries_for_extraction = entries
         result.seen_entries_cache_hits = 0
 
-        candidates = await _stub_event_extraction(entries_for_extraction, run_id)
+        candidates = await event_extraction.run(entries_for_extraction, run_id)
         result.extraction_candidates = len(candidates)
 
         normalized = await _stub_event_normalization(candidates, run_id)
