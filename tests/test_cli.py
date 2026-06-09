@@ -52,14 +52,27 @@ def test_build_parser_uat_subcommand() -> None:
     assert args.verbose is True
 
 
-def test_write_summary_json_writes_empty_object(tmp_path: Path) -> None:
+def test_write_summary_json_writes_pipeline_counts(tmp_path: Path) -> None:
     run_dir = tmp_path / f"uat_{TEST_RUN_ID}"
     run_dir.mkdir()
+    result = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt=SANDLOT_PROMPT,
+        raw_entries=10,
+        seen_entries_cache_hits=3,
+        seen_entries_cache_misses=7,
+        seen_entries_hit_rate_pct=30.0,
+    )
 
-    summary_path = write_summary_json(run_dir)
+    summary_path = write_summary_json(run_dir, result)
 
     assert summary_path.exists()
-    assert json.loads(summary_path.read_text(encoding="utf-8")) == {}
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["run_id"] == TEST_RUN_ID
+    assert summary["raw_entries"] == 10
+    assert summary["seen_entries_cache_hits"] == 3
+    assert summary["seen_entries_cache_misses"] == 7
+    assert summary["seen_entries_hit_rate_pct"] == 30.0
 
 
 @pytest.mark.asyncio
@@ -78,7 +91,10 @@ async def test_run_uat_creates_output_directory_and_summary(
     assert result.run_id == TEST_RUN_ID
     run_dir = output_dir / f"uat_{TEST_RUN_ID}"
     assert run_dir.is_dir()
-    assert json.loads((run_dir / "summary.json").read_text(encoding="utf-8")) == {}
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["run_id"] == TEST_RUN_ID
+    assert summary["raw_entries"] == 0
+    assert summary["seen_entries_cache_hits"] == 0
 
 
 @pytest.mark.asyncio
