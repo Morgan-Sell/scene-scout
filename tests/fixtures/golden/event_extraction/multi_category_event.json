@@ -1,0 +1,33 @@
+{
+  "fixture_id": "multi_category_event",
+  "description": "Event with multiple RSS category tags spanning genres.",
+  "entry": {
+    "feed_id": "sandlot-pickup-league",
+    "feed_name": "Mr. Mertle's Events Feed",
+    "source_url": "https://example.com/sandlot-feed.xml",
+    "run_id": "youre-killing-me-smalls",
+    "title": "Benny's Block Party & Pickup Game",
+    "link": "https://example.com/benny-block-party",
+    "description": "All-day block party with a pickup baseball game at sunset.",
+    "published_raw": "Sun, 08 Jun 2025 14:00:00 +0000",
+    "author": "Benny Rodriguez",
+    "categories": ["Music", "Community", "Sports", "Family", "Outdoor"],
+    "enclosure_url": null,
+    "fetched_at": "2025-06-06T12:00:00+00:00"
+  },
+  "llm_output": {
+    "title": "Benny's Block Party & Pickup Game",
+    "date": "Sun, 08 Jun 2025",
+    "time": "2:00 PM",
+    "venue": "The Sandlot",
+    "neighborhood": "San Fernando Valley",
+    "city": "Los Angeles",
+    "url": "https://example.com/benny-block-party",
+    "price": "Free",
+    "description": "All-day block party with a pickup baseball game at sunset.",
+    "categories": ["Music", "Community", "Sports", "Family", "Outdoor"],
+    "is_event": true,
+    "extraction_confidence": 0.88
+  },
+  "include_in_results": true
+}

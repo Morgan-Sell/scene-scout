@@ -1,0 +1,33 @@
+{
+  "fixture_id": "non_event_article",
+  "description": "Editorial news article — not a dated event with a venue.",
+  "entry": {
+    "feed_id": "sandlot-pickup-league",
+    "feed_name": "Mr. Mertle's Events Feed",
+    "source_url": "https://example.com/sandlot-feed.xml",
+    "run_id": "youre-killing-me-smalls",
+    "title": "Why the Beast Finally Left the Backyard Alone",
+    "link": "https://example.com/beast-backyard-editorial",
+    "description": "A long-form essay on sandlot lore and the legend of Hercules the dog. No date or venue — pure editorial.",
+    "published_raw": "Mon, 02 Jun 2025 09:00:00 +0000",
+    "author": "Squints Palledorous",
+    "categories": ["Editorial"],
+    "enclosure_url": null,
+    "fetched_at": "2025-06-06T12:00:00+00:00"
+  },
+  "llm_output": {
+    "title": "Why the Beast Finally Left the Backyard Alone",
+    "date": null,
+    "time": null,
+    "venue": null,
+    "neighborhood": null,
+    "city": "Los Angeles",
+    "url": "https://example.com/beast-backyard-editorial",
+    "price": null,
+    "description": "Long-form editorial about sandlot lore — not a scheduled event.",
+    "categories": ["Editorial"],
+    "is_event": false,
+    "extraction_confidence": 0.15
+  },
+  "include_in_results": false
+}

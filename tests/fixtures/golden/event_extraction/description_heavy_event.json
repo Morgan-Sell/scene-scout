@@ -1,0 +1,33 @@
+{
+  "fixture_id": "description_heavy_event",
+  "description": "Event details embedded in HTML description body rather than structured RSS fields.",
+  "entry": {
+    "feed_id": "sandlot-pickup-league",
+    "feed_name": "Mr. Mertle's Events Feed",
+    "source_url": "https://example.com/sandlot-feed.xml",
+    "run_id": "youre-killing-me-smalls",
+    "title": "Summer Showdown",
+    "link": "https://example.com/summer-showdown",
+    "description": "<p>Join us at <strong>The Sandlot</strong> in the San Fernando Valley on <em>Sat, Jul 4 1993</em> at 6:00 PM. Tickets: $5 donation. Bring your glove.</p>",
+    "published_raw": "Wed, 01 Jul 1993 12:00:00 +0000",
+    "author": null,
+    "categories": ["Baseball"],
+    "enclosure_url": null,
+    "fetched_at": "2025-06-06T12:00:00+00:00"
+  },
+  "llm_output": {
+    "title": "Summer Showdown",
+    "date": "Sat, Jul 4 1993",
+    "time": "6:00 PM",
+    "venue": "The Sandlot",
+    "neighborhood": "San Fernando Valley",
+    "city": "Los Angeles",
+    "url": "https://example.com/summer-showdown",
+    "price": "$5 donation",
+    "description": "Pickup baseball showdown at The Sandlot. Bring your glove.",
+    "categories": ["Baseball"],
+    "is_event": true,
+    "extraction_confidence": 0.78
+  },
+  "include_in_results": true
+}
