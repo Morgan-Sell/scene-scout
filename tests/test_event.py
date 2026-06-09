@@ -1,7 +1,8 @@
 """
 Tests for event domain models.
 
-Covers EventCandidate validation, optional null fields, and required-field enforcement.
+Covers EventCandidateLLMOutput validation, EventCandidate merge from LLM output,
+optional null fields, and required-field enforcement.
 """
 
 from __future__ import annotations
@@ -11,14 +12,17 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from scene_scout.models.event import EventCandidate
+from scene_scout.models.event import (
+    EventCandidate,
+    EventCandidateLLMOutput,
+)
 from tests.conftest import TEST_RUN_ID
 
 SANDLOT_FEED = "sandlot-pickup-league"
 EXTRACTED_AT = datetime(1993, 7, 4, 12, 0, tzinfo=timezone.utc)
 
 
-def _valid_candidate(**overrides: object) -> EventCandidate:
+def _valid_llm_output(**overrides: object) -> EventCandidateLLMOutput:
     payload = {
         "title": "The Great Bambino Night",
         "date": "Sat, Jul 4 1993",
@@ -32,21 +36,60 @@ def _valid_candidate(**overrides: object) -> EventCandidate:
         "categories": ["Baseball", "Legends"],
         "is_event": True,
         "extraction_confidence": 0.92,
-        "source_feed": SANDLOT_FEED,
-        "run_id": TEST_RUN_ID,
-        "extracted_at": EXTRACTED_AT,
     }
     payload.update(overrides)
-    return EventCandidate.model_validate(payload)
+    return EventCandidateLLMOutput.model_validate(payload)
 
 
-def test_event_candidate_validates_full_payload() -> None:
-    candidate = _valid_candidate()
+def _valid_candidate(**overrides: object) -> EventCandidate:
+    llm_fields = {
+        "title",
+        "date",
+        "time",
+        "venue",
+        "neighborhood",
+        "city",
+        "url",
+        "price",
+        "description",
+        "categories",
+        "is_event",
+        "extraction_confidence",
+    }
+    llm_overrides = {k: overrides[k] for k in llm_fields if k in overrides}
+    llm_output = _valid_llm_output(**llm_overrides)
+    extracted_at = overrides.get("extracted_at", EXTRACTED_AT)
+    assert isinstance(extracted_at, datetime)
+    return EventCandidate.from_llm_output(
+        llm_output,
+        source_feed=str(overrides.get("source_feed", SANDLOT_FEED)),
+        run_id=str(overrides.get("run_id", TEST_RUN_ID)),
+        extracted_at=extracted_at,
+    )
 
-    assert candidate.title == "The Great Bambino Night"
-    assert candidate.is_event is True
-    assert candidate.extraction_confidence == 0.92
-    assert candidate.categories == ["Baseball", "Legends"]
+
+def test_event_candidate_llm_output_validates_full_payload() -> None:
+    output = _valid_llm_output()
+
+    assert output.title == "The Great Bambino Night"
+    assert output.is_event is True
+    assert output.extraction_confidence == 0.92
+    assert output.categories == ["Baseball", "Legends"]
+
+
+def test_event_candidate_from_llm_output_merges_metadata() -> None:
+    llm_output = _valid_llm_output()
+    candidate = EventCandidate.from_llm_output(
+        llm_output,
+        source_feed=SANDLOT_FEED,
+        run_id=TEST_RUN_ID,
+        extracted_at=EXTRACTED_AT,
+    )
+
+    assert candidate.title == llm_output.title
+    assert candidate.source_feed == SANDLOT_FEED
+    assert candidate.run_id == TEST_RUN_ID
+    assert candidate.extracted_at == EXTRACTED_AT
 
 
 def test_event_candidate_accepts_none_for_optional_fields() -> None:
@@ -71,33 +114,33 @@ def test_event_candidate_accepts_none_for_optional_fields() -> None:
     assert candidate.is_event is False
 
 
-def test_event_candidate_requires_is_event() -> None:
-    payload = _valid_candidate().model_dump()
+def test_event_candidate_llm_output_requires_is_event() -> None:
+    payload = _valid_llm_output().model_dump()
     del payload["is_event"]
 
     with pytest.raises(ValidationError, match="is_event"):
-        EventCandidate.model_validate(payload)
+        EventCandidateLLMOutput.model_validate(payload)
 
 
-def test_event_candidate_requires_extraction_confidence() -> None:
-    payload = _valid_candidate().model_dump()
+def test_event_candidate_llm_output_requires_extraction_confidence() -> None:
+    payload = _valid_llm_output().model_dump()
     del payload["extraction_confidence"]
 
     with pytest.raises(ValidationError, match="extraction_confidence"):
-        EventCandidate.model_validate(payload)
+        EventCandidateLLMOutput.model_validate(payload)
 
 
-def test_event_candidate_rejects_confidence_out_of_range() -> None:
+def test_event_candidate_llm_output_rejects_confidence_out_of_range() -> None:
     with pytest.raises(ValidationError, match="extraction_confidence"):
-        _valid_candidate(extraction_confidence=1.5)
+        _valid_llm_output(extraction_confidence=1.5)
 
     with pytest.raises(ValidationError, match="extraction_confidence"):
-        _valid_candidate(extraction_confidence=-0.1)
+        _valid_llm_output(extraction_confidence=-0.1)
 
 
-def test_event_candidate_rejects_missing_required_string_fields() -> None:
-    payload = _valid_candidate().model_dump()
+def test_event_candidate_llm_output_rejects_missing_required_string_fields() -> None:
+    payload = _valid_llm_output().model_dump()
     del payload["title"]
 
     with pytest.raises(ValidationError, match="title"):
-        EventCandidate.model_validate(payload)
+        EventCandidateLLMOutput.model_validate(payload)

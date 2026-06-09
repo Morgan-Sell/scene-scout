@@ -1,8 +1,10 @@
 """
 Event domain models for SceneScout.
 
-``EventCandidate`` is the extraction agent output (Phase 3). ``NormalizedEvent`` is
-defined here for cache serialization (Phase 2.8) and normalization (Phase 4).
+``EventCandidateLLMOutput`` is the schema validated against LLM JSON.
+``EventCandidate`` adds agent-owned metadata via :meth:`EventCandidate.from_llm_output`.
+``NormalizedEvent`` is defined for cache serialization (Phase 2.8) and normalization
+(Phase 4).
 """
 
 from __future__ import annotations
@@ -13,8 +15,8 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
-class EventCandidate(BaseModel):
-    """Structured output from the event extraction agent."""
+class EventCandidateLLMOutput(BaseModel):
+    """Fields returned by the LLM during event extraction."""
 
     title: str
     date: str | None = None
@@ -28,9 +30,6 @@ class EventCandidate(BaseModel):
     categories: list[str] = Field(default_factory=list)
     is_event: bool
     extraction_confidence: float
-    source_feed: str
-    run_id: str
-    extracted_at: datetime
 
     @field_validator("extraction_confidence")
     @classmethod
@@ -38,6 +37,31 @@ class EventCandidate(BaseModel):
         if not 0.0 <= value <= 1.0:
             raise ValueError("extraction_confidence must be between 0.0 and 1.0")
         return value
+
+
+class EventCandidate(EventCandidateLLMOutput):
+    """Full extraction agent output — LLM fields plus pipeline metadata."""
+
+    source_feed: str
+    run_id: str
+    extracted_at: datetime
+
+    @classmethod
+    def from_llm_output(
+        cls,
+        output: EventCandidateLLMOutput,
+        *,
+        source_feed: str,
+        run_id: str,
+        extracted_at: datetime,
+    ) -> EventCandidate:
+        """Build a full candidate by merging LLM output with agent metadata."""
+        return cls(
+            **output.model_dump(),
+            source_feed=source_feed,
+            run_id=run_id,
+            extracted_at=extracted_at,
+        )
 
 
 class NormalizedEvent(BaseModel):
