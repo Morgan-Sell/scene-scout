@@ -1,8 +1,8 @@
 """
 Event domain models for SceneScout.
 
-``NormalizedEvent`` is defined here for cache serialization (Phase 2.8) and will be
-extended by normalization agents in Phase 4.
+``EventCandidate`` is the extraction agent output (Phase 3). ``NormalizedEvent`` is
+defined here for cache serialization (Phase 2.8) and normalization (Phase 4).
 """
 
 from __future__ import annotations
@@ -10,7 +10,34 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class EventCandidate(BaseModel):
+    """Structured output from the event extraction agent."""
+
+    title: str
+    date: str | None = None
+    time: str | None = None
+    venue: str | None = None
+    neighborhood: str | None = None
+    city: str
+    url: str
+    price: str | None = None
+    description: str | None = None
+    categories: list[str] = Field(default_factory=list)
+    is_event: bool
+    extraction_confidence: float
+    source_feed: str
+    run_id: str
+    extracted_at: datetime
+
+    @field_validator("extraction_confidence")
+    @classmethod
+    def _validate_extraction_confidence(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("extraction_confidence must be between 0.0 and 1.0")
+        return value
 
 
 class NormalizedEvent(BaseModel):

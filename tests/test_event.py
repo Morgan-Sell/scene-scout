@@ -1,0 +1,103 @@
+"""
+Tests for event domain models.
+
+Covers EventCandidate validation, optional null fields, and required-field enforcement.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import pytest
+from pydantic import ValidationError
+
+from scene_scout.models.event import EventCandidate
+from tests.conftest import TEST_RUN_ID
+
+SANDLOT_FEED = "sandlot-pickup-league"
+EXTRACTED_AT = datetime(1993, 7, 4, 12, 0, tzinfo=timezone.utc)
+
+
+def _valid_candidate(**overrides: object) -> EventCandidate:
+    payload = {
+        "title": "The Great Bambino Night",
+        "date": "Sat, Jul 4 1993",
+        "time": "6:00 PM",
+        "venue": "The Sandlot",
+        "neighborhood": "San Fernando Valley",
+        "city": "Los Angeles",
+        "url": "https://example.com/great-bambino-night",
+        "price": "Free",
+        "description": "Legends retell the Babe Ruth story under the floodlights.",
+        "categories": ["Baseball", "Legends"],
+        "is_event": True,
+        "extraction_confidence": 0.92,
+        "source_feed": SANDLOT_FEED,
+        "run_id": TEST_RUN_ID,
+        "extracted_at": EXTRACTED_AT,
+    }
+    payload.update(overrides)
+    return EventCandidate.model_validate(payload)
+
+
+def test_event_candidate_validates_full_payload() -> None:
+    candidate = _valid_candidate()
+
+    assert candidate.title == "The Great Bambino Night"
+    assert candidate.is_event is True
+    assert candidate.extraction_confidence == 0.92
+    assert candidate.categories == ["Baseball", "Legends"]
+
+
+def test_event_candidate_accepts_none_for_optional_fields() -> None:
+    candidate = _valid_candidate(
+        date=None,
+        time=None,
+        venue=None,
+        neighborhood=None,
+        price=None,
+        description=None,
+        categories=[],
+        is_event=False,
+        extraction_confidence=0.15,
+    )
+
+    assert candidate.date is None
+    assert candidate.time is None
+    assert candidate.venue is None
+    assert candidate.neighborhood is None
+    assert candidate.price is None
+    assert candidate.description is None
+    assert candidate.is_event is False
+
+
+def test_event_candidate_requires_is_event() -> None:
+    payload = _valid_candidate().model_dump()
+    del payload["is_event"]
+
+    with pytest.raises(ValidationError, match="is_event"):
+        EventCandidate.model_validate(payload)
+
+
+def test_event_candidate_requires_extraction_confidence() -> None:
+    payload = _valid_candidate().model_dump()
+    del payload["extraction_confidence"]
+
+    with pytest.raises(ValidationError, match="extraction_confidence"):
+        EventCandidate.model_validate(payload)
+
+
+def test_event_candidate_rejects_confidence_out_of_range() -> None:
+    with pytest.raises(ValidationError, match="extraction_confidence"):
+        _valid_candidate(extraction_confidence=1.5)
+
+    with pytest.raises(ValidationError, match="extraction_confidence"):
+        _valid_candidate(extraction_confidence=-0.1)
+
+
+def test_event_candidate_rejects_missing_required_string_fields() -> None:
+    payload = _valid_candidate().model_dump()
+    del payload["title"]
+
+    with pytest.raises(ValidationError, match="title"):
+        EventCandidate.model_validate(payload)
