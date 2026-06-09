@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,8 +18,7 @@ from typing import Any
 from rich.console import Console
 from rich.style import Style
 
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-_DEFAULT_LOGS_DIR = _PROJECT_ROOT / "vol-logs"
+from scene_scout.config import vol_logs_dir
 
 # Agent key -> (display prefix, rich color name)
 AGENT_COLORS: dict[str, tuple[str, str]] = {
@@ -64,10 +62,7 @@ def _logs_dir() -> Path:
     Path
         Resolved log directory, created if it does not exist.
     """
-    configured = os.getenv("VOL_LOGS_DIR")
-    path = Path(configured) if configured else _DEFAULT_LOGS_DIR
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return vol_logs_dir()
 
 
 def _lock_for(path: Path) -> threading.Lock:

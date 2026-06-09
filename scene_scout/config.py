@@ -16,10 +16,33 @@ from scene_scout.models.feed import FeedConfig
 
 load_dotenv()
 
-# Resolve config directory relative to the project root.
+# Resolve paths relative to the project root.
 # This works whether the code is run from the repo root or elsewhere.
-_PROJECT_ROOT = Path(__file__).parent.parent
-_FEEDS_CONFIG_PATH = _PROJECT_ROOT / "config" / "feeds.yaml"
+PROJECT_ROOT = Path(__file__).parent.parent
+_FEEDS_CONFIG_PATH = PROJECT_ROOT / "config" / "feeds.yaml"
+
+
+def _vol_dir(env_var: str, default_relative: str) -> Path:
+    """Return a persistent volume directory, honoring ``env_var`` when set."""
+    configured = os.getenv(env_var)
+    path = Path(configured) if configured else PROJECT_ROOT / default_relative
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def vol_logs_dir() -> Path:
+    """Return the directory for structured JSONL run logs."""
+    return _vol_dir("VOL_LOGS_DIR", "vol-logs")
+
+
+def vol_pipeline_state_dir() -> Path:
+    """Return the directory for persisted pipeline state."""
+    return _vol_dir("VOL_PIPELINE_STATE_DIR", "vol-pipeline-state")
+
+
+def vol_cache_dir() -> Path:
+    """Return the directory for the SQLite cache database."""
+    return _vol_dir("VOL_CACHE_DIR", "vol-cache")
 
 
 def load_feed_configs(path: Path = _FEEDS_CONFIG_PATH) -> list[FeedConfig]:

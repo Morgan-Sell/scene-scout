@@ -40,6 +40,15 @@ def _isolate_vol_pipeline_state(
     return state_dir
 
 
+@pytest.fixture(autouse=True)
+def _isolate_vol_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Redirect vol-cache to a temp dir so tests never write to the real vol-cache/."""
+    cache_dir = tmp_path / "wendy-peffercorn-locker"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("VOL_CACHE_DIR", str(cache_dir))
+    return cache_dir
+
+
 @pytest.fixture
 def logs_dir(_isolate_vol_logs: Path) -> Path:
     """Temp directory where JSONL run logs are written during tests."""
