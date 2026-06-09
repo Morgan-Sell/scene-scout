@@ -1,8 +1,10 @@
 """
 Event domain models for SceneScout.
 
-``EventCandidate`` is the extraction agent output (Phase 3). ``NormalizedEvent`` is
-defined here for cache serialization (Phase 2.8) and normalization (Phase 4).
+``EventCandidateLLMOutput`` is the schema validated against LLM JSON.
+``EventCandidate`` adds agent-owned metadata via :meth:`EventCandidate.from_llm_output`.
+``NormalizedEvent`` is defined for cache serialization (Phase 2.8) and normalization
+(Phase 4).
 """
 
 from __future__ import annotations

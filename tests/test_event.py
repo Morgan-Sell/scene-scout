@@ -1,7 +1,8 @@
 """
 Tests for event domain models.
 
-Covers EventCandidate validation, optional null fields, and required-field enforcement.
+Covers EventCandidateLLMOutput validation, EventCandidate merge from LLM output,
+optional null fields, and required-field enforcement.
 """
 
 from __future__ import annotations
@@ -11,7 +12,10 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from scene_scout.models.event import EventCandidate, EventCandidateLLMOutput
+from scene_scout.models.event import (
+    EventCandidate,
+    EventCandidateLLMOutput,
+)
 from tests.conftest import TEST_RUN_ID
 
 SANDLOT_FEED = "sandlot-pickup-league"
@@ -64,6 +68,15 @@ def _valid_candidate(**overrides: object) -> EventCandidate:
     )
 
 
+def test_event_candidate_llm_output_validates_full_payload() -> None:
+    output = _valid_llm_output()
+
+    assert output.title == "The Great Bambino Night"
+    assert output.is_event is True
+    assert output.extraction_confidence == 0.92
+    assert output.categories == ["Baseball", "Legends"]
+
+
 def test_event_candidate_from_llm_output_merges_metadata() -> None:
     llm_output = _valid_llm_output()
     candidate = EventCandidate.from_llm_output(
@@ -77,15 +90,6 @@ def test_event_candidate_from_llm_output_merges_metadata() -> None:
     assert candidate.source_feed == SANDLOT_FEED
     assert candidate.run_id == TEST_RUN_ID
     assert candidate.extracted_at == EXTRACTED_AT
-
-
-def test_event_candidate_validates_full_payload() -> None:
-    candidate = _valid_candidate()
-
-    assert candidate.title == "The Great Bambino Night"
-    assert candidate.is_event is True
-    assert candidate.extraction_confidence == 0.92
-    assert candidate.categories == ["Baseball", "Legends"]
 
 
 def test_event_candidate_accepts_none_for_optional_fields() -> None:
