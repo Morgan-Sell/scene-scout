@@ -2,7 +2,7 @@
 Tests for event domain models.
 
 Covers EventCandidateLLMOutput validation, EventCandidate merge from LLM output,
-optional null fields, and required-field enforcement.
+NormalizedEvent validation and defaults, and required-field enforcement.
 """
 
 from __future__ import annotations
@@ -15,11 +15,18 @@ from pydantic import ValidationError
 from scene_scout.models.event import (
     EventCandidate,
     EventCandidateLLMOutput,
+    NormalizedEvent,
+    compute_normalized_event_id,
 )
 from tests.conftest import TEST_RUN_ID
 
 SANDLOT_FEED = "sandlot-pickup-league"
 EXTRACTED_AT = datetime(1993, 7, 4, 12, 0, tzinfo=timezone.utc)
+NORMALIZED_AT = datetime(1993, 7, 4, 18, 0, tzinfo=timezone.utc)
+EVENT_TITLE = "The Great Bambino Night"
+EVENT_DATE = "Sat, Jul 4 1993"
+EVENT_VENUE = "The Sandlot"
+EVENT_ID = compute_normalized_event_id(EVENT_TITLE, EVENT_DATE, EVENT_VENUE)
 
 
 def _valid_llm_output(**overrides: object) -> EventCandidateLLMOutput:
@@ -144,3 +151,132 @@ def test_event_candidate_llm_output_rejects_missing_required_string_fields() -> 
 
     with pytest.raises(ValidationError, match="title"):
         EventCandidateLLMOutput.model_validate(payload)
+
+
+def _valid_normalized_event(**overrides: object) -> NormalizedEvent:
+    payload = {
+        "id": EVENT_ID,
+        "title": EVENT_TITLE,
+        "start_datetime": NORMALIZED_AT,
+        "venue": EVENT_VENUE,
+        "city": "Los Angeles",
+        "url": "https://example.com/great-bambino-night",
+        "is_free": True,
+        "description": "Legends retell the Babe Ruth story under the floodlights.",
+        "source_feeds": [SANDLOT_FEED],
+        "source_count": 1,
+        "best_source_feed": SANDLOT_FEED,
+        "source_quality_score": 0.8,
+        "description_quality_score": 0.75,
+        "low_information": False,
+        "run_id": TEST_RUN_ID,
+        "normalized_at": NORMALIZED_AT,
+    }
+    payload.update(overrides)
+    return NormalizedEvent.model_validate(payload)
+
+
+def test_compute_normalized_event_id_is_stable_sha256() -> None:
+    event_id = compute_normalized_event_id(EVENT_TITLE, EVENT_DATE, EVENT_VENUE)
+
+    assert event_id == EVENT_ID
+    assert len(event_id) == 64
+    assert event_id == compute_normalized_event_id(EVENT_TITLE, EVENT_DATE, EVENT_VENUE)
+
+
+def test_normalized_event_validates_full_payload() -> None:
+    event = _valid_normalized_event(
+        neighborhood="San Fernando Valley",
+        price_cents=0,
+        categories=["Baseball", "Legends"],
+        end_datetime=datetime(1993, 7, 4, 22, 0, tzinfo=timezone.utc),
+    )
+
+    assert event.id == EVENT_ID
+    assert event.title == EVENT_TITLE
+    assert event.source_feeds == [SANDLOT_FEED]
+    assert event.source_count == 1
+    assert event.best_source_feed == SANDLOT_FEED
+    assert event.source_quality_score == 0.8
+    assert event.description_quality_score == 0.75
+    assert event.low_information is False
+
+
+def test_normalized_event_applies_defaults_for_optional_fields() -> None:
+    event = NormalizedEvent(
+        id=EVENT_ID,
+        title=EVENT_TITLE,
+        start_datetime=NORMALIZED_AT,
+        venue=EVENT_VENUE,
+        city="Los Angeles",
+        url="https://example.com/great-bambino-night",
+        is_free=True,
+        description="Legends retell the Babe Ruth story.",
+    )
+
+    assert event.end_datetime is None
+    assert event.neighborhood is None
+    assert event.price_cents is None
+    assert event.categories == []
+    assert event.source_feeds == []
+    assert event.source_count == 1
+    assert event.best_source_feed == ""
+    assert event.source_quality_score == 0.0
+    assert event.description_quality_score == 0.0
+    assert event.low_information is False
+    assert event.run_id == ""
+    assert event.normalized_at is None
+
+
+def test_normalized_event_requires_core_fields() -> None:
+    payload = _valid_normalized_event().model_dump()
+    required_fields = (
+        "id",
+        "title",
+        "start_datetime",
+        "venue",
+        "city",
+        "url",
+        "description",
+    )
+    for field in required_fields:
+        invalid = dict(payload)
+        del invalid[field]
+        with pytest.raises(ValidationError, match=field):
+            NormalizedEvent.model_validate(invalid)
+
+
+def test_normalized_event_requires_is_free() -> None:
+    payload = _valid_normalized_event().model_dump()
+    del payload["is_free"]
+
+    with pytest.raises(ValidationError, match="is_free"):
+        NormalizedEvent.model_validate(payload)
+
+
+def test_normalized_event_rejects_quality_scores_out_of_range() -> None:
+    with pytest.raises(ValidationError, match="quality scores"):
+        _valid_normalized_event(source_quality_score=1.5)
+
+    with pytest.raises(ValidationError, match="quality scores"):
+        _valid_normalized_event(description_quality_score=-0.1)
+
+
+def test_normalized_event_rejects_source_count_below_one() -> None:
+    with pytest.raises(ValidationError, match="source_count"):
+        _valid_normalized_event(source_count=0)
+
+
+def test_normalized_event_accepts_multi_feed_provenance() -> None:
+    rival_feed = "rival-neighborhood-league"
+    event = _valid_normalized_event(
+        source_feeds=[SANDLOT_FEED, rival_feed],
+        source_count=2,
+        best_source_feed=rival_feed,
+        source_quality_score=0.95,
+    )
+
+    assert event.source_feeds == [SANDLOT_FEED, rival_feed]
+    assert event.source_count == 2
+    assert event.best_source_feed == rival_feed
+    assert event.source_quality_score == 0.95
