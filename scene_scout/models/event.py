@@ -9,10 +9,32 @@ Event domain models for SceneScout.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+
+
+def compute_normalized_event_id(title: str, date: str, venue: str) -> str:
+    """Return a stable deduplication ID for a normalized event.
+
+    Parameters
+    ----------
+    title : str
+        Event title.
+    date : str
+        Event date as written or normalized (used verbatim in the hash input).
+    venue : str
+        Venue name.
+
+    Returns
+    -------
+    str
+        SHA-256 hex digest of ``title + date + venue``.
+    """
+    payload = f"{title}{date}{venue}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class EventCandidateLLMOutput(BaseModel):
@@ -65,7 +87,13 @@ class EventCandidate(EventCandidateLLMOutput):
 
 
 class NormalizedEvent(BaseModel):
-    """Structured event record after normalization."""
+    """Structured event record after normalization.
+
+    ``id`` is a SHA-256 hash of ``title + date + venue`` (see
+    :func:`compute_normalized_event_id`). Source provenance fields are populated at
+    normalization time with a single feed and updated by deduplication when records
+    from multiple feeds are merged.
+    """
 
     id: str
     title: str
@@ -87,6 +115,20 @@ class NormalizedEvent(BaseModel):
     low_information: bool = False
     run_id: str = ""
     normalized_at: datetime | None = None
+
+    @field_validator("source_quality_score", "description_quality_score")
+    @classmethod
+    def _validate_quality_score(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("quality scores must be between 0.0 and 1.0")
+        return value
+
+    @field_validator("source_count")
+    @classmethod
+    def _validate_source_count(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("source_count must be at least 1")
+        return value
 
 
 class PerformerInfo(BaseModel):
