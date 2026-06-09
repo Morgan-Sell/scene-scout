@@ -1,0 +1,48 @@
+# Local development only — production deploy uses Modal (see docs/architecture.md).
+#
+# Shared named volumes mirror Modal persistent stores so both containers see the
+# same cache, logs, pipeline state, and output directories.
+
+services:
+  pipeline:
+    build:
+      context: .
+      dockerfile: docker/pipeline/Dockerfile
+    container_name: scene-scout-pipeline
+    environment:
+      DRY_RUN: "true"
+      VOL_LOGS_DIR: /app/vol-logs
+      VOL_PIPELINE_STATE_DIR: /app/vol-pipeline-state
+    volumes: &shared-volumes
+      - vol-logs:/app/vol-logs
+      - vol-pipeline-state:/app/vol-pipeline-state
+      - vol-cache:/app/vol-cache
+      - vol-profiles:/app/vol-profiles
+      - vol-chroma:/app/vol-chroma
+      - vol-feedback:/app/vol-feedback
+      - vol-history:/app/vol-history
+      - output:/app/output
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    container_name: scene-scout-web
+    ports:
+      - "7860:7860"
+    environment:
+      GRADIO_SERVER_PORT: "7860"
+      GRADIO_PASSWORD: ${GRADIO_PASSWORD:-}
+      VOL_LOGS_DIR: /app/vol-logs
+      VOL_PIPELINE_STATE_DIR: /app/vol-pipeline-state
+    volumes: *shared-volumes
+
+volumes:
+  vol-logs:
+  vol-pipeline-state:
+  vol-cache:
+  vol-profiles:
+  vol-chroma:
+  vol-feedback:
+  vol-history:
+  output:
