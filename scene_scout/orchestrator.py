@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 from scene_scout.agents import event_extraction
-from scene_scout.agents import event_extraction
 from scene_scout.config import vol_pipeline_state_dir
 from scene_scout.logging import get_logger
 
