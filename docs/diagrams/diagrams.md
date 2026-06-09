@@ -1,6 +1,12 @@
 # SceneScout Diagrams
 
-Open this file in Cursor and press `Cmd+Shift+V` to render both diagrams.
+Open this file in Cursor and press **Cmd+Shift+V** (Mac) or **Ctrl+Shift+V** (Windows/Linux)
+to preview both diagrams.
+
+Source files (edit these first, then sync the fenced blocks below):
+
+- [system_architecture.mmd](./system_architecture.mmd)
+- [data_flow.mmd](./data_flow.mmd)
 
 ---
 
@@ -10,13 +16,15 @@ Open this file in Cursor and press `Cmd+Shift+V` to render both diagrams.
 %%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#1e1e2e', 'primaryTextColor': '#cdd6f4', 'primaryBorderColor': '#89b4fa', 'lineColor': '#89b4fa', 'secondaryColor': '#181825', 'tertiaryColor': '#313244'}}}%%
 flowchart TD
     subgraph INFRA["Infrastructure"]
-        MODAL["Modal Scheduler\n(weekly cron)"]
-        GRADIO["Gradio UI\n(Modal Web Endpoint)\nBuilt-in auth"]
+        MODAL["Modal Scheduler\nweekly cron"]
+        GRADIO["Gradio UI\nModal Web Endpoint\nbuilt-in auth"]
     end
 
     subgraph PIPELINE["scene-scout-pipeline"]
+        ORCH["Orchestrator\nrun_id + PipelineState"]
+
         subgraph PHASE1["Phase 1 — Ingest and Normalize"]
-            FS["Feed Scout\nasync concurrent"]
+            FS["Feed Scout\nasync concurrent\nETag 304"]
             EX["Event Extraction\nLiteLLM"]
             NO["Event Normalization\ndeterministic"]
             DD["Deduplication\nexact → fuzzy → LLM"]
@@ -26,9 +34,9 @@ flowchart TD
         end
 
         subgraph BATCH["Batch Enrichment — BatchStrategy"]
-            TS["Talent Scout\nNER + affinity"]
+            TS["Talent Scout\nperformer affinity"]
             VC["Vibe Classifier\natmosphere tags"]
-            NS["Neighborhood Scout\nhyper-local, 1km radius"]
+            NS["Neighborhood Scout\nhyper-local 1km"]
         end
 
         subgraph PHASE2["Phase 2 — Rank and Send"]
@@ -47,11 +55,14 @@ flowchart TD
         FB["GET /feedback\nnegative signal"]
     end
 
-    subgraph SERVICES["Shared Services"]
-        LLM["services/llm.py\ncentralized LLM calls"]
-        PL["services/prompt_loader.py\nJinja2 render_prompt()"]
+    subgraph SERVICES["Shared Services — implemented"]
+        LLM["services/llm.py\ncomplete()"]
+        PL["services/prompt_loader.py\nrender_prompt()"]
         BS["services/batch.py\nBatchStrategy"]
         CS["services/cache.py\nSQLite TTL cache"]
+    end
+
+    subgraph SERVICES_PLANNED["Shared Services — planned"]
         CH["services/chroma.py\nembeddings"]
         FBS["services/feedback.py"]
         HS["services/history.py"]
@@ -62,27 +73,32 @@ flowchart TD
         VC2["vol-chroma\nliked-event embeddings"]
         VFB["vol-feedback\nFeedbackEvent SQLite"]
         VH["vol-history\nhistory SQLite"]
-        VCA["vol-cache\nenrichment + geocoding"]
+        VCA["vol-cache\nenrichment + seen_entries"]
         VPS["vol-pipeline-state\nPipelineState JSON"]
         VL["vol-logs\nJSONL 90-day rolling"]
     end
 
-    MODAL --> PHASE1
+    MODAL --> ORCH
+    ORCH --> PHASE1
     FS --> EX --> NO --> DD --> DQ --> GEO --> FI
-    FI -->|"cache check"| CS
-    FI -->|"submit batch"| BS
+    FS -.->|seen_entries| CS
+    CS -.-> VCA
+    FI -->|cache check| CS
+    GEO -.->|venue cache| CS
+    FI -->|submit batch| BS
     BS --> BATCH
-    VPS <-->|"PipelineState"| BATCH
-    BATCH -->|"apply results"| PHASE2
+    BATCH -.->|write| VCA
+    VPS <-->|PipelineState| ORCH
+    BATCH -->|apply results| PHASE2
     VP --> RK
     VC2 --> RK
     RK --> SO --> CU
     HS <--> CU
     CU --> EC
-    EC -->|"Resend"| USER(("User\nUSER_EMAIL"))
+    EC -->|Resend| USER(("User\nUSER_EMAIL"))
 
-    USER -->|"event link"| TR
-    USER -->|"not for me"| FB
+    USER -->|event link| TR
+    USER -->|not for me| FB
     TR --> FBS --> VFB
     FB --> FBS
     VFB --> UP
@@ -95,13 +111,13 @@ flowchart TD
     GRADIO <--> VL
     EV --> VL
 
-    LLM -.->|"used by"| EX
-    LLM -.->|"used by"| BATCH
-    LLM -.->|"used by"| RK
-    LLM -.->|"used by"| EC
-    LLM -.->|"used by"| UP
-    LLM -.->|"used by"| EV
-    PL -.->|"used by"| LLM
+    LLM -.->|used by| EX
+    LLM -.->|used by| BATCH
+    LLM -.->|used by| RK
+    LLM -.->|used by| EC
+    LLM -.->|used by| UP
+    LLM -.->|used by| EV
+    PL -.->|used by| LLM
 ```
 
 ---
@@ -111,53 +127,61 @@ flowchart TD
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#1e1e2e', 'primaryTextColor': '#cdd6f4', 'primaryBorderColor': '#89b4fa', 'lineColor': '#89b4fa', 'secondaryColor': '#181825', 'tertiaryColor': '#313244'}}}%%
 flowchart TD
-    RSS["RSS Feeds\nlist[FeedConfig]"]
+    RSS["RSS Feeds\nFeedConfig list"]
 
-    RSS --> A1["1. Feed Scout\nout: list[RawFeedEntry]\n     list[FeedHealthReport]"]
+    RSS --> A1["1. Feed Scout\nout: RawFeedEntry list\n     FeedHealthReport list"]
 
-    A1 --> A2["2. Event Extraction\nin:  list[RawFeedEntry]\nout: list[EventCandidate]\n  title, venue, date, city\n  is_event: bool\n  extraction_confidence: float"]
+    A1 -->|"seen_entries hit → skip extraction"| CACHE_SEEN["seen_entries cache\nNormalizedEvent by feed_id + entry_hash"]
+    CACHE_SEEN --> A3B["reuse NormalizedEvent\nbypass extraction + normalization"]
 
-    A2 -->|"is_event=False → discard"| A3["3. Event Normalization\nout: list[NormalizedEvent]\n  id: SHA-256 hash\n  start_datetime: datetime\n  price_cents: Optional[int]\n  is_free: bool"]
+    A1 -->|"cache miss"| A2["2. Event Extraction\nin:  RawFeedEntry list\nout: EventCandidate list\n  title, venue, date, city\n  is_event bool\n  extraction_confidence float"]
 
-    A3 --> A4["4. Deduplication\nout: list[NormalizedEvent]\n  exact → fuzzy → embedding → LLM\n  + merge_log"]
+    A2 -->|"valid events"| A3["3. Event Normalization\nout: NormalizedEvent list\n  id SHA-256 hash\n  start_datetime\n  price_cents optional\n  is_free bool"]
 
-    A4 --> A5["5. Description Quality\nout: list[NormalizedEvent]\n  description_quality_score: float\n  low_information: bool"]
+    A2 -->|"is_event=False"| DISCARD_EXT["discarded at extraction"]
 
-    A5 --> GEO["Nominatim Geocoding\nout: venue_coordinates: tuple[float,float]\n  poi_list within 1km"]
+    A3 --> A4
+    A3B --> A4["4. Deduplication\nout: NormalizedEvent list deduped\n  exact → fuzzy → embedding → LLM\n  merge_log"]
 
-    GEO -->|"low_information=True → discard\noutside week → discard\n2-week window → discard"| FILTER["Pre-Enrichment Filter\nenrichment candidates only"]
+    A4 --> A5["5. Description Quality\nout: NormalizedEvent list\n  description_quality_score float\n  low_information bool"]
 
-    FILTER -->|"cache hit → skip LLM\ncache miss → batch"| BATCH["BatchStrategy\nAnthropicBatch or ConcurrentAsync\nsingle submission per run"]
+    A5 --> GEO["Nominatim Geocoding\nout: venue_coordinates lat/lon\n  poi_list within 1km"]
 
-    BATCH --> A6["EnrichedEvent\n  performers: list[PerformerInfo]\n    name, entity_type, genre_tags\n    confidence, affinity_score\n  top_performer_affinity: float\n  vibe_tags: list[str] (2-5 tags)\n  neighborhood_context: Optional[str]\n  neighborhood_confidence: float\n  venue_coordinates: Optional[tuple]"]
+    GEO --> FILTER["Pre-Enrichment Filter\nenrichment candidates only"]
 
-    PROF["UserProfile\n  name, email\n  category_weights: dict\n  vibe_preferences: list\n  excluded_categories: list"] --> A7
+    FILTER -->|"low_information discard\noutside week discard\n2-week window discard"| DISCARD["discarded events"]
 
-    CHROMA["Chroma Index\nvol-chroma\nliked-event embeddings"] --> A7
+    FILTER -->|"enrichment cache hit skip LLM\ncache miss → batch"| BATCH["BatchStrategy\nAnthropicBatch or ConcurrentAsync\nsingle submission per run"]
 
-    A6 --> A7["6. Ranking Agent\nout: list[RankedEvent]\n  score: float\n  score_breakdown:\n    category_fit\n    vibe_fit\n    semantic_similarity\n    performer_affinity\n    location\n    novelty\n    source_quality\n    description_quality\n  explanation: str (LLM, grounded)\n  wildcard_slot: bool"]
+    BATCH --> A6["EnrichedEvent\n  performers PerformerInfo list\n  top_performer_affinity float\n  vibe_tags 2-5 strings\n  neighborhood_context optional\n  neighborhood_confidence float\n  venue_coordinates optional"]
 
-    A7 --> A8["7. Sell-Out Risk\nout: list[RankedEvent]\n  sellout_risk: low|medium|high\n  (heuristic classifier)"]
+    PROF["UserProfile\n  name, email\n  category_weights map\n  vibe_preferences list\n  excluded_categories list"] --> A7
 
-    HIST["Recommendation History\nvol-history\nrecency penalties applied"] --> A9
+    CHROMA["Chroma Index vol-chroma\nliked-event embeddings"] --> A7
 
-    A8 --> A9["8. Recommendation Curator — Allegra\nout: list[CuratedRecommendation] ≤10\n  rank: int\n  explanation: str (intact)\n  neighborhood_context: Optional[str]\n  sellout_urgency_note: Optional[str]\n  feedback_token: UUID\n  is_wildcard: bool"]
+    A6 --> A7["6. Ranking Agent\nout: RankedEvent list\n  score float\n  score_breakdown:\n    category_fit, vibe_fit\n    semantic_similarity\n    performer_affinity, location\n    novelty, source_quality\n    description_quality\n  explanation string LLM grounded\n  wildcard_slot bool"]
 
-    A9 --> A10["9. Email Composer\nout: HTML email via Resend\n  tracking links per recommendation:\n    /track?token=X&signal=click&redirect=...\n    /feedback?token=X&signal=negative\n  subject: [UAT {run_id}] in UAT mode"]
+    A7 --> A8["7. Sell-Out Risk\nout: RankedEvent list\n  sellout_risk low medium high"]
 
-    A10 --> EMAIL["User Email\nUSER_EMAIL Modal Secret"]
+    HIST["Recommendation History vol-history\nrecency penalties applied"] --> A9
 
-    EMAIL -->|"click event link"| SIG1["FeedbackEvent\n  signal: click\n  token, event_id, categories\n  score_breakdown, rank, run_id"]
+    A8 --> A9["8. Recommendation Curator Allegra\nout: CuratedRecommendation max 10\n  rank int\n  explanation string intact\n  neighborhood_context optional\n  sellout_urgency_note optional\n  feedback_token UUID\n  is_wildcard bool"]
 
-    EMAIL -->|"not for me"| SIG2["FeedbackEvent\n  signal: negative"]
+    A9 --> A10["9. Email Composer\nout: HTML email via Resend\n  tracking links per recommendation\n    /track token click redirect\n    /feedback token negative signal\n  UAT subject prefix with run_id"]
+
+    A10 --> EMAIL["User Email USER_EMAIL Modal Secret"]
+
+    EMAIL -->|"click event link"| SIG1["FeedbackEvent click\n  token, event_id, categories\n  score_breakdown, rank, run_id"]
+
+    EMAIL -->|"not for me"| SIG2["FeedbackEvent negative"]
 
     SIG1 --> FBSTORE["vol-feedback SQLite"]
     SIG2 --> FBSTORE
 
-    FBSTORE --> UPA["User Preference Agent\n  decay-weighted delta:\n    e^(-λt), half-life 30 days\n  category_weights updated\n  vibe_preferences updated\n  Chroma index updated (clicks)"]
+    FBSTORE --> UPA["User Preference Agent\n  decay-weighted delta e^-lambda t\n  half-life 30 days\n  category_weights updated\n  vibe_preferences updated\n  Chroma index updated on clicks"]
 
     UPA --> PROF
     UPA --> CHROMA
 
-    A10 --> EVAL["10. Evaluation Agent\nout: quality report\n  overall_quality: float\n  flagged_recommendations\n  list_level_issues"]
+    A10 --> EVAL["10. Evaluation Agent\nout: quality report\n  overall_quality float\n  flagged_recommendations\n  list_level_issues"]
 ```

@@ -1,78 +1,105 @@
-%%{init: {'theme': 'dark'}}%%
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#1e1e2e', 'primaryTextColor': '#cdd6f4', 'primaryBorderColor': '#89b4fa', 'lineColor': '#89b4fa', 'secondaryColor': '#181825', 'tertiaryColor': '#313244'}}}%%
 flowchart TD
     subgraph INFRA["Infrastructure"]
-        MODAL["Modal Scheduler"]
-        GRADIO["Gradio UI\n(Modal Web Endpoint)"]
+        MODAL["Modal Scheduler\nweekly cron"]
+        GRADIO["Gradio UI\nModal Web Endpoint\nbuilt-in auth"]
     end
 
-    subgraph PIPELINE["Pipeline Container — scene-scout-pipeline"]
-        subgraph PHASE1["Phase 1: Ingest & Normalize"]
-            FS["Feed Scout\n(async)"]
-            EX["Event Extraction\n(Claude API)"]
-            NO["Event Normalization"]
-            DD["Deduplication"]
-            DQ["Description Quality\n(rubric)"]
+    subgraph PIPELINE["scene-scout-pipeline"]
+        ORCH["Orchestrator\nrun_id + PipelineState"]
+
+        subgraph PHASE1["Phase 1 — Ingest and Normalize"]
+            FS["Feed Scout\nasync concurrent\nETag 304"]
+            EX["Event Extraction\nLiteLLM"]
+            NO["Event Normalization\ndeterministic"]
+            DD["Deduplication\nexact → fuzzy → LLM"]
+            DQ["Description Quality\nrubric, no LLM"]
+            GEO["Geocoding\nNominatim"]
             FI["Pre-Enrichment Filter"]
         end
 
-        subgraph BATCH["Batch Enrichment — Claude Batch API"]
-            TS["Talent Scout"]
-            VC["Vibe Classifier"]
-            NS["Neighborhood Scout"]
+        subgraph BATCH["Batch Enrichment — BatchStrategy"]
+            TS["Talent Scout\nperformer affinity"]
+            VC["Vibe Classifier\natmosphere tags"]
+            NS["Neighborhood Scout\nhyper-local 1km"]
         end
 
-        subgraph PHASE2["Phase 2: Rank & Send"]
-            RK["Ranking Agent\n(scoring + Chroma)"]
-            SO["Sell-Out Risk"]
-            CU["Recommendation Curator\n(Margot)"]
-            EC["Email Composer\n(Claude API)"]
+        subgraph PHASE2["Phase 2 — Rank and Send"]
+            UP["User Preference Agent\nLiteLLM + delta logic"]
+            RK["Ranking Agent\ndeterministic scoring\nLiteLLM explanations"]
+            SO["Sell-Out Risk\nheuristic classifier"]
+            CU["Recommendation Curator\nAllegra"]
+            EC["Email Composer\nLiteLLM + Resend"]
         end
 
-        EV["Evaluation Agent"]
+        EV["Evaluation Agent\nLiteLLM-as-judge"]
     end
 
-    subgraph WEB["Web Container — scene-scout-web"]
-        TR["Tracking Endpoint\n/track"]
-        FB["Feedback Endpoint\n/feedback"]
-        UP["User Preference Agent"]
+    subgraph WEB["scene-scout-web"]
+        TR["GET /track\nclick signal + redirect"]
+        FB["GET /feedback\nnegative signal"]
     end
 
-    subgraph STORES["Persistent Volumes"]
-        VF["vol-feeds\nglobal_feeds.yaml"]
+    subgraph SERVICES["Shared Services — implemented"]
+        LLM["services/llm.py\ncomplete()"]
+        PL["services/prompt_loader.py\nrender_prompt()"]
+        BS["services/batch.py\nBatchStrategy"]
+        CS["services/cache.py\nSQLite TTL cache"]
+    end
+
+    subgraph SERVICES_PLANNED["Shared Services — planned"]
+        CH["services/chroma.py\nembeddings"]
+        FBS["services/feedback.py"]
+        HS["services/history.py"]
+    end
+
+    subgraph VOLUMES["Persistent Volumes"]
         VP["vol-profiles\nUserProfile JSON"]
-        VC2["vol-chroma\nLiked-event embeddings"]
-        VFB["vol-feedback\nFeedback SQLite"]
-        VH["vol-history\nHistory SQLite"]
-        VCA["vol-cache\nEnrichment SQLite"]
-        VPS["vol-pipeline-state\nBatch ID + events"]
-        VL["vol-logs\nJSONL run logs"]
+        VC2["vol-chroma\nliked-event embeddings"]
+        VFB["vol-feedback\nFeedbackEvent SQLite"]
+        VH["vol-history\nhistory SQLite"]
+        VCA["vol-cache\nenrichment + seen_entries"]
+        VPS["vol-pipeline-state\nPipelineState JSON"]
+        VL["vol-logs\nJSONL 90-day rolling"]
     end
 
-    MODAL --> PHASE1
-    VF --> FS
-    FS --> EX --> NO --> DD --> DQ --> FI
-    FI -->|submit| BATCH
-    FI -.->|check| VCA
+    MODAL --> ORCH
+    ORCH --> PHASE1
+    FS --> EX --> NO --> DD --> DQ --> GEO --> FI
+    FS -.->|seen_entries| CS
+    CS -.-> VCA
+    FI -->|cache check| CS
+    GEO -.->|venue cache| CS
+    FI -->|submit batch| BS
+    BS --> BATCH
     BATCH -.->|write| VCA
-    VPS <-->|state| BATCH
-    BATCH -->|retrieve| PHASE2
+    VPS <-->|PipelineState| ORCH
+    BATCH -->|apply results| PHASE2
     VP --> RK
     VC2 --> RK
     RK --> SO --> CU
-    VH <--> CU
+    HS <--> CU
     CU --> EC
-    EC -->|email sent| USER(("User"))
+    EC -->|Resend| USER(("User\nUSER_EMAIL"))
 
-    USER -->|click event link| TR
+    USER -->|event link| TR
     USER -->|not for me| FB
-    TR --> VFB
-    FB --> VFB
+    TR --> FBS --> VFB
+    FB --> FBS
     VFB --> UP
     UP --> VP
-    UP --> VC2
+    UP --> CH --> VC2
 
     GRADIO <--> VP
     GRADIO <--> VFB
     GRADIO <--> VH
     GRADIO <--> VL
-    EV <--> VL
+    EV --> VL
+
+    LLM -.->|used by| EX
+    LLM -.->|used by| BATCH
+    LLM -.->|used by| RK
+    LLM -.->|used by| EC
+    LLM -.->|used by| UP
+    LLM -.->|used by| EV
+    PL -.->|used by| LLM

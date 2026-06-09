@@ -1,46 +1,59 @@
-%%{init: {'theme': 'dark'}}%%
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#1e1e2e', 'primaryTextColor': '#cdd6f4', 'primaryBorderColor': '#89b4fa', 'lineColor': '#89b4fa', 'secondaryColor': '#181825', 'tertiaryColor': '#313244'}}}%%
 flowchart TD
-    RSS["RSS Feeds\nlist[FeedConfig]"]
+    RSS["RSS Feeds\nFeedConfig list"]
 
-    RSS --> A1["Feed Scout\n─────────────\nout: list[RawFeedEntry]\n     list[FeedHealthReport]"]
+    RSS --> A1["1. Feed Scout\nout: RawFeedEntry list\n     FeedHealthReport list"]
 
-    A1 --> A2["Event Extraction\n─────────────\nin:  list[RawFeedEntry]\nout: list[EventCandidate]\n     ├ title: str\n     ├ date: Optional[str]\n     ├ venue: Optional[str]\n     ├ is_event: bool\n     └ extraction_confidence: float"]
+    A1 -->|"seen_entries hit → skip extraction"| CACHE_SEEN["seen_entries cache\nNormalizedEvent by feed_id + entry_hash"]
+    CACHE_SEEN --> A3B["reuse NormalizedEvent\nbypass extraction + normalization"]
 
-    A2 -->|"filter: is_event=False discarded"| A3["Event Normalization\n─────────────\nin:  list[EventCandidate]\nout: list[NormalizedEvent]\n     ├ id: str (hash)\n     ├ start_datetime: datetime\n     ├ price_cents: Optional[int]\n     └ is_free: bool"]
+    A1 -->|"cache miss"| A2["2. Event Extraction\nin:  RawFeedEntry list\nout: EventCandidate list\n  title, venue, date, city\n  is_event bool\n  extraction_confidence float"]
 
-    A3 --> A4["Deduplication\n─────────────\nin:  list[NormalizedEvent]\nout: list[NormalizedEvent] (deduped)\n     + merge_log"]
+    A2 -->|"valid events"| A3["3. Event Normalization\nout: NormalizedEvent list\n  id SHA-256 hash\n  start_datetime\n  price_cents optional\n  is_free bool"]
 
-    A4 --> A5["Description Quality\n─────────────\nin:  list[NormalizedEvent]\nout: list[NormalizedEvent]\n     ├ description_quality_score: float\n     └ low_information: bool"]
+    A2 -->|"is_event=False"| DISCARD_EXT["discarded at extraction"]
 
-    A5 -->|"filter: low_information=True\n+ outside coming week\n+ in 2-week exclude window"| FILTER["Pre-Enrichment Filter\n─────────────\nenrichment candidates only"]
+    A3 --> A4
+    A3B --> A4["4. Deduplication\nout: NormalizedEvent list deduped\n  exact → fuzzy → embedding → LLM\n  merge_log"]
 
-    FILTER -->|"cache miss → batch"| BATCH["Claude Batch API\n─────────────\nTalent Scout + Vibe + Neighborhood\nsingle submission, single retrieval"]
+    A4 --> A5["5. Description Quality\nout: NormalizedEvent list\n  description_quality_score float\n  low_information bool"]
 
-    BATCH --> A6["Enriched Events\n─────────────\nlist[EnrichedEvent]\n ├ performers: list[PerformerInfo]\n ├ top_performer_affinity: float\n ├ vibe_tags: list[str]\n ├ neighborhood_context: Optional[str]\n └ neighborhood_confidence: float"]
+    A5 --> GEO["Nominatim Geocoding\nout: venue_coordinates lat/lon\n  poi_list within 1km"]
 
-    PROF["UserProfile\n─────────────\n├ category_weights\n└ vibe_preferences"] --> A7
-    CHROMA["Chroma Index\nvol-chroma"] --> A7
+    GEO --> FILTER["Pre-Enrichment Filter\nenrichment candidates only"]
 
-    A6 --> A7["Ranking Agent\n─────────────\nin:  list[EnrichedEvent] + UserProfile + Chroma\nout: list[RankedEvent]\n     ├ score: float\n     ├ score_breakdown: dict[str, float]\n     │   ├ category_fit\n     │   ├ vibe_fit\n     │   ├ semantic_similarity\n     │   ├ performer_affinity\n     │   ├ location\n     │   ├ novelty\n     │   ├ source_quality\n     │   └ description_quality\n     ├ explanation: str\n     └ wildcard_slot: bool"]
+    FILTER -->|"low_information discard\noutside week discard\n2-week window discard"| DISCARD["discarded events"]
 
-    A7 --> A8["Sell-Out Risk\n─────────────\nin:  list[RankedEvent]\nout: list[RankedEvent]\n     └ sellout_risk: low|medium|high"]
+    FILTER -->|"enrichment cache hit skip LLM\ncache miss → batch"| BATCH["BatchStrategy\nAnthropicBatch or ConcurrentAsync\nsingle submission per run"]
 
-    HIST["Recommendation History\nvol-history"] --> A9
+    BATCH --> A6["EnrichedEvent\n  performers PerformerInfo list\n  top_performer_affinity float\n  vibe_tags 2-5 strings\n  neighborhood_context optional\n  neighborhood_confidence float\n  venue_coordinates optional"]
 
-    A8 --> A9["Recommendation Curator (Margot)\n─────────────\nin:  list[RankedEvent] + history\nout: list[CuratedRecommendation] ≤10\n     ├ rank: int\n     ├ explanation: str (intact)\n     ├ neighborhood_context: Optional[str]\n     ├ sellout_urgency_note: Optional[str]\n     ├ feedback_token: str (UUID)\n     └ is_wildcard: bool"]
+    PROF["UserProfile\n  name, email\n  category_weights map\n  vibe_preferences list\n  excluded_categories list"] --> A7
 
-    A9 --> A10["Email Composer\n─────────────\nin:  list[CuratedRecommendation] + UserProfile\nout: HTML email\n     └ tracking links per recommendation\n         ├ /track?token=X&signal=click&redirect=...\n         └ /feedback?token=X&signal=negative"]
+    CHROMA["Chroma Index vol-chroma\nliked-event embeddings"] --> A7
 
-    A10 --> EMAIL["User Email"]
+    A6 --> A7["6. Ranking Agent\nout: RankedEvent list\n  score float\n  score_breakdown:\n    category_fit, vibe_fit\n    semantic_similarity\n    performer_affinity, location\n    novelty, source_quality\n    description_quality\n  explanation string LLM grounded\n  wildcard_slot bool"]
 
-    EMAIL -->|"click event link"| SIG1["FeedbackEvent\n─────────────\n├ signal: click\n├ token: str\n├ event_categories: list[str]\n├ score_breakdown: dict\n├ rank: int\n└ run_id: str"]
+    A7 --> A8["7. Sell-Out Risk\nout: RankedEvent list\n  sellout_risk low medium high"]
 
-    EMAIL -->|"not for me"| SIG2["FeedbackEvent\n─────────────\n└ signal: negative"]
+    HIST["Recommendation History vol-history\nrecency penalties applied"] --> A9
 
-    SIG1 --> FBSTORE["vol-feedback\nSQLite"]
+    A8 --> A9["8. Recommendation Curator Allegra\nout: CuratedRecommendation max 10\n  rank int\n  explanation string intact\n  neighborhood_context optional\n  sellout_urgency_note optional\n  feedback_token UUID\n  is_wildcard bool"]
+
+    A9 --> A10["9. Email Composer\nout: HTML email via Resend\n  tracking links per recommendation\n    /track token click redirect\n    /feedback token negative signal\n  UAT subject prefix with run_id"]
+
+    A10 --> EMAIL["User Email USER_EMAIL Modal Secret"]
+
+    EMAIL -->|"click event link"| SIG1["FeedbackEvent click\n  token, event_id, categories\n  score_breakdown, rank, run_id"]
+
+    EMAIL -->|"not for me"| SIG2["FeedbackEvent negative"]
+
+    SIG1 --> FBSTORE["vol-feedback SQLite"]
     SIG2 --> FBSTORE
 
-    FBSTORE --> UPA["User Preference Agent\n─────────────\napplies decay-weighted delta\nto category_weights + vibe_preferences\nupdates Chroma with positive signals"]
+    FBSTORE --> UPA["User Preference Agent\n  decay-weighted delta e^-lambda t\n  half-life 30 days\n  category_weights updated\n  vibe_preferences updated\n  Chroma index updated on clicks"]
 
     UPA --> PROF
     UPA --> CHROMA
+
+    A10 --> EVAL["10. Evaluation Agent\nout: quality report\n  overall_quality float\n  flagged_recommendations\n  list_level_issues"]
