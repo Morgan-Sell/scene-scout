@@ -202,7 +202,6 @@ async def _stub_feed_scout(run_id: str) -> tuple[list[Any], list[Any]]:
     return [], []
 
 
-
 async def _stub_event_normalization(candidates: list[Any], run_id: str) -> list[Any]:
     """Stub for Event Normalization Agent."""
     return []
