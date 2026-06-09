@@ -12,16 +12,14 @@ shape.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from scene_scout.config import vol_pipeline_state_dir
 from scene_scout.logging import get_logger
 
-_PROJECT_ROOT = Path(__file__).parent.parent
-_DEFAULT_PIPELINE_STATE_DIR = _PROJECT_ROOT / "vol-pipeline-state"
 _PIPELINE_STATE_FILENAME = "pipeline_state.json"
 
 PipelinePhase = str  # "phase_1" | "batch_submitted" | "phase_2" | "complete"
@@ -148,10 +146,7 @@ def _pipeline_state_dir() -> Path:
     Path
         Resolved pipeline state directory, created if it does not exist.
     """
-    configured = os.getenv("VOL_PIPELINE_STATE_DIR")
-    path = Path(configured) if configured else _DEFAULT_PIPELINE_STATE_DIR
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return vol_pipeline_state_dir()
 
 
 def _pipeline_state_path() -> Path:

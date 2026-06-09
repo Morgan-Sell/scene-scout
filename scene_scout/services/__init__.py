@@ -10,6 +10,7 @@ from scene_scout.services.batch import (
     ConcurrentBatchStrategy,
     get_batch_strategy,
 )
+from scene_scout.services.cache import CacheService
 from scene_scout.services.llm import (
     LLMInfrastructureError,
     LLMValidationError,
@@ -24,6 +25,7 @@ __all__ = [
     "BatchResultItem",
     "BatchResults",
     "BatchStrategy",
+    "CacheService",
     "ConcurrentBatchStrategy",
     "LLMInfrastructureError",
     "LLMValidationError",

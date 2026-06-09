@@ -15,12 +15,11 @@ import os
 import sys
 from pathlib import Path
 
-from scene_scout.config import is_dry_run
+from scene_scout.config import PROJECT_ROOT, is_dry_run
 from scene_scout.logging import configure_log_level, get_logger
 from scene_scout.orchestrator import Orchestrator, PipelineResult
 
-_PROJECT_ROOT = Path(__file__).parent.parent
-_OUTPUT_DIR = _PROJECT_ROOT / "output"
+_OUTPUT_DIR = PROJECT_ROOT / "output"
 
 
 def uat_output_dir(run_id: str) -> Path:
