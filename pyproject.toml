@@ -24,6 +24,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "respx>=0.21",           # HTTP mocking for tests
 ]
+web = [
+    "gradio>=4.0",           # Gradio UI — web container only
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
