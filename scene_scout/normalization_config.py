@@ -1,0 +1,72 @@
+"""Normalization policy constants for SceneScout."""
+
+NORMALIZATION_WINDOW_DAYS = 7
+
+# Controlled vocabulary for event categories after normalization.
+EVENT_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "Art",
+        "Classical",
+        "Comedy",
+        "Community",
+        "Country",
+        "Dance",
+        "Education",
+        "Electronic",
+        "Family",
+        "Fashion",
+        "Film",
+        "Folk",
+        "Food",
+        "Hip-Hop",
+        "Jazz",
+        "Literature",
+        "Music",
+        "Nightlife",
+        "Outdoor",
+        "Rock",
+        "Sports",
+        "Technology",
+        "Theater",
+        "Wellness",
+    }
+)
+
+# Maps common RSS / LLM labels to canonical category names.
+CATEGORY_ALIASES: dict[str, str] = {
+    "art": "Art",
+    "arts": "Art",
+    "baseball": "Sports",
+    "comedy": "Comedy",
+    "community": "Community",
+    "concert": "Music",
+    "concerts": "Music",
+    "country": "Country",
+    "dance": "Dance",
+    "education": "Education",
+    "electronic": "Electronic",
+    "family": "Family",
+    "fashion": "Fashion",
+    "film": "Film",
+    "films": "Film",
+    "food": "Food",
+    "hip hop": "Hip-Hop",
+    "hip-hop": "Hip-Hop",
+    "indie": "Film",
+    "independent": "Film",
+    "jazz": "Jazz",
+    "legends": "Community",
+    "literature": "Literature",
+    "music": "Music",
+    "nightlife": "Nightlife",
+    "outdoor": "Outdoor",
+    "pool": "Outdoor",
+    "rock": "Rock",
+    "sport": "Sports",
+    "sports": "Sports",
+    "tech": "Technology",
+    "technology": "Technology",
+    "theater": "Theater",
+    "theatre": "Theater",
+    "wellness": "Wellness",
+}
