@@ -101,17 +101,23 @@ async def run(
         if report.succeeded:
             logger.info(
                 "[%s] Feed OK: %s — %d entries fetched",
-                run_id, report.feed_name, report.entries_fetched,
+                run_id,
+                report.feed_name,
+                report.entries_fetched,
             )
         elif report.skipped:
             logger.info(
                 "[%s] Feed UNCHANGED (304): %s — skipped",
-                run_id, report.feed_name,
+                run_id,
+                report.feed_name,
             )
         else:
             logger.warning(
                 "[%s] Feed failed: %s — status=%s error=%s",
-                run_id, report.feed_name, report.status, report.error_message,
+                run_id,
+                report.feed_name,
+                report.status,
+                report.error_message,
             )
 
     _log_summary(run_id, health_reports)
@@ -280,11 +286,12 @@ async def _fetch_feed(
 
     # Step 4: Convert parsed entries to RawFeedEntry models
     entries = [
-        _parse_entry(entry, config, fetched_at, run_id)
-        for entry in parsed.entries
+        _parse_entry(entry, config, fetched_at, run_id) for entry in parsed.entries
     ]
 
-    status = FeedStatus.OK if len(entries) >= _MIN_EXPECTED_ENTRIES else FeedStatus.STALE
+    status = (
+        FeedStatus.OK if len(entries) >= _MIN_EXPECTED_ENTRIES else FeedStatus.STALE
+    )
 
     return entries, FeedHealthReport(
         feed_id=config.id,
@@ -378,13 +385,18 @@ def _log_summary(run_id: str, reports: list[FeedHealthReport]) -> None:
     logger.info(
         "[%s] Feed Scout complete: %d/%d feeds OK, %d unchanged (304), "
         "%d failed, %d total entries, %d/%d feeds support ETag",
-        run_id, succeeded, total, unchanged, failed,
-        total_entries, etag_supported, total,
+        run_id,
+        succeeded,
+        total,
+        unchanged,
+        failed,
+        total_entries,
+        etag_supported,
+        total,
     )
 
     if failed > 0:
         failed_names = [
-            r.feed_name for r in reports
-            if not r.succeeded and not r.skipped
+            r.feed_name for r in reports if not r.succeeded and not r.skipped
         ]
         logger.warning("[%s] Failed feeds: %s", run_id, ", ".join(failed_names))

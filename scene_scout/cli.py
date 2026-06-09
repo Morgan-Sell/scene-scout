@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -58,7 +57,9 @@ def write_summary_json(output_dir: Path) -> Path:
     return summary_path
 
 
-async def run_uat(prompt: str, *, dry_run: bool = False, verbose: bool = False) -> PipelineResult:
+async def run_uat(
+    prompt: str, *, dry_run: bool = False, verbose: bool = False
+) -> PipelineResult:
     """Execute a UAT pipeline run.
 
     Parameters

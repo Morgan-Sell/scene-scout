@@ -352,7 +352,10 @@ class CacheService:
                         now + timedelta(days=VENUE_GEO_TTL_DAYS)
                     )
 
-                if neighborhood_context is not None or neighborhood_confidence is not None:
+                if (
+                    neighborhood_context is not None
+                    or neighborhood_confidence is not None
+                ):
                     context_expires_at = _format_dt(
                         now + timedelta(days=VENUE_CONTEXT_TTL_DAYS)
                     )

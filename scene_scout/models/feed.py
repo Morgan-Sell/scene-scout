@@ -40,12 +40,12 @@ class FeedStatus(str, Enum):
         Fewer entries returned than the minimum expected threshold.
     """
 
-    OK          = "ok"
-    UNCHANGED   = "unchanged"
+    OK = "ok"
+    UNCHANGED = "unchanged"
     UNREACHABLE = "unreachable"
-    MALFORMED   = "malformed"
-    EMPTY       = "empty"
-    STALE       = "stale"
+    MALFORMED = "malformed"
+    EMPTY = "empty"
+    STALE = "stale"
 
 
 class FeedConfig(BaseModel):
