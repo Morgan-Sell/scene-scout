@@ -143,19 +143,27 @@ class AgentLogger:
         """
         self._level = level
 
-    def debug(self, message: str, *args: Any, data: dict[str, Any] | None = None) -> None:
+    def debug(
+        self, message: str, *args: Any, data: dict[str, Any] | None = None
+    ) -> None:
         """Log a DEBUG-level message."""
         self._log(logging.DEBUG, message, *args, data=data)
 
-    def info(self, message: str, *args: Any, data: dict[str, Any] | None = None) -> None:
+    def info(
+        self, message: str, *args: Any, data: dict[str, Any] | None = None
+    ) -> None:
         """Log an INFO-level message."""
         self._log(logging.INFO, message, *args, data=data)
 
-    def warning(self, message: str, *args: Any, data: dict[str, Any] | None = None) -> None:
+    def warning(
+        self, message: str, *args: Any, data: dict[str, Any] | None = None
+    ) -> None:
         """Log a WARNING-level message."""
         self._log(logging.WARNING, message, *args, data=data)
 
-    def error(self, message: str, *args: Any, data: dict[str, Any] | None = None) -> None:
+    def error(
+        self, message: str, *args: Any, data: dict[str, Any] | None = None
+    ) -> None:
         """Log an ERROR-level message."""
         self._log(logging.ERROR, message, *args, data=data)
 

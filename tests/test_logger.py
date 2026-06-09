@@ -101,7 +101,12 @@ def test_set_run_id_enables_jsonl(logs_dir: Path) -> None:
     logger.set_run_id(TEST_RUN_ID)
     logger.info("Pipeline started")
 
-    lines = (logs_dir / f"{TEST_RUN_ID}.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    lines = (
+        (logs_dir / f"{TEST_RUN_ID}.jsonl")
+        .read_text(encoding="utf-8")
+        .strip()
+        .splitlines()
+    )
     assert len(lines) == 1
     assert json.loads(lines[0])["message"] == "Pipeline started"
 

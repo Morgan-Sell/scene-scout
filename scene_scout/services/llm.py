@@ -293,7 +293,8 @@ def _validate_response(data: Any, response_model: type[T]) -> T:
         return response_model.model_validate(data)
     except ValidationError as exc:
         raise LLMValidationError(
-            f"LLM response failed schema validation for {response_model.__name__}: {exc}"
+            "LLM response failed schema validation for "
+            f"{response_model.__name__}: {exc}"
         ) from exc
 
 

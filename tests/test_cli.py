@@ -5,11 +5,17 @@ Tests for the SceneScout CLI and UAT skeleton.
 import json
 import logging
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
-from scene_scout.cli import build_parser, main, run_uat, uat_output_dir, write_summary_json
+from scene_scout.cli import (
+    build_parser,
+    main,
+    run_uat,
+    uat_output_dir,
+    write_summary_json,
+)
 from scene_scout.logging.logger import _logger_cache
 from scene_scout.orchestrator import PipelineResult
 from tests.conftest import TEST_RUN_ID
