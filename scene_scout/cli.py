@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -37,23 +38,44 @@ def uat_output_dir(run_id: str) -> Path:
     return _OUTPUT_DIR / f"uat_{run_id}"
 
 
-def write_summary_json(output_dir: Path) -> Path:
-    """Write an empty UAT summary file.
-
-    Phase 2.5 skeleton — populated with stage counts in later phases.
+def write_summary_json(output_dir: Path, result: PipelineResult) -> Path:
+    """Write UAT summary statistics for a pipeline run.
 
     Parameters
     ----------
     output_dir : Path
         UAT run output directory.
+    result : PipelineResult
+        Per-stage counts from the orchestrator.
 
     Returns
     -------
     Path
         Path to the written ``summary.json`` file.
     """
+    summary = {
+        "run_id": result.run_id,
+        "raw_entries": result.raw_entries,
+        "feeds_unchanged": result.feeds_unchanged,
+        "seen_entries_cache_hits": result.seen_entries_cache_hits,
+        "seen_entries_cache_misses": result.seen_entries_cache_misses,
+        "seen_entries_hit_rate_pct": result.seen_entries_hit_rate_pct,
+        "extraction_candidates": result.extraction_candidates,
+        "normalized_events": result.normalized_events,
+        "deduplicated_events": result.deduplicated_events,
+        "after_description_quality": result.after_description_quality,
+        "after_pre_enrichment_filter": result.after_pre_enrichment_filter,
+        "enriched_events": result.enriched_events,
+        "ranked_events": result.ranked_events,
+        "after_sellout_risk": result.after_sellout_risk,
+        "curated_recommendations": result.curated_recommendations,
+        "evaluation_flags": result.evaluation_flags,
+    }
     summary_path = output_dir / "summary.json"
-    summary_path.write_text("{}\n", encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(summary, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return summary_path
 
 
@@ -92,7 +114,7 @@ async def run_uat(
 
     output_dir = uat_output_dir(result.run_id)
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_summary_json(output_dir)
+    write_summary_json(output_dir, result)
 
     logger = get_logger("orchestrator", run_id=result.run_id)
     logger.info(
