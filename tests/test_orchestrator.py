@@ -319,7 +319,7 @@ async def test_orchestrator_seen_entries_cache_miss_runs_extraction_and_stores(
         mock_extraction,
     )
     monkeypatch.setattr(
-        "scene_scout.orchestrator._stub_event_normalization",
+        "scene_scout.orchestrator.event_normalization.run",
         AsyncMock(return_value=[normalized]),
     )
     monkeypatch.setattr(

@@ -16,6 +16,7 @@ dependencies = [
     "rich>=13.0",            # Color-coded per-agent terminal logging
     "litellm>=1.0",          # Unified LLM provider interface
     "jinja2>=3.0",           # Prompt template rendering
+    "python-dateutil>=2.9",  # Fuzzy date parsing in normalization
 ]
 
 [project.optional-dependencies]
