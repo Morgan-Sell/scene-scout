@@ -17,6 +17,7 @@ dependencies = [
     "litellm>=1.0",          # Unified LLM provider interface
     "jinja2>=3.0",           # Prompt template rendering
     "python-dateutil>=2.9",  # Fuzzy date parsing in normalization
+    "rapidfuzz>=3.0",        # Deterministic fuzzy deduplication
 ]
 
 [project.optional-dependencies]

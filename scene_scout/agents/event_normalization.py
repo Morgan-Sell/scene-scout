@@ -138,9 +138,7 @@ def is_within_normalization_window(
 
 
 def _feed_quality_scores() -> dict[str, float]:
-    return {
-        feed.id: feed.source_quality_score for feed in load_feed_configs()
-    }
+    return {feed.id: feed.source_quality_score for feed in load_feed_configs()}
 
 
 def normalize_candidate(
@@ -245,11 +243,16 @@ async def run(candidates: list[EventCandidate], run_id: str) -> list[NormalizedE
             continue
 
         if event is None:
-            if parse_event_datetime(
-                candidate.date,
-                candidate.time,
-                default=reference.replace(hour=12, minute=0, second=0, microsecond=0),
-            ) is None:
+            if (
+                parse_event_datetime(
+                    candidate.date,
+                    candidate.time,
+                    default=reference.replace(
+                        hour=12, minute=0, second=0, microsecond=0
+                    ),
+                )
+                is None
+            ):
                 logger.warning(
                     "Discarding candidate with unparseable date: %s",
                     candidate.title,
