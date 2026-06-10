@@ -81,3 +81,8 @@ LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "3"))
 LLM_RETRY_BASE_DELAY_SECONDS: float = float(
     os.getenv("LLM_RETRY_BASE_DELAY_SECONDS", "1.0")
 )
+
+# Description quality — events below this score are flagged low_information.
+DESCRIPTION_QUALITY_THRESHOLD: float = float(
+    os.getenv("DESCRIPTION_QUALITY_THRESHOLD", "0.3")
+)

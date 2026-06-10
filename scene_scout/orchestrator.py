@@ -18,7 +18,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from scene_scout.agents import deduplication, event_extraction, event_normalization
+from scene_scout.agents import (
+    deduplication,
+    description_quality,
+    event_extraction,
+    event_normalization,
+)
 from scene_scout.config import vol_pipeline_state_dir
 from scene_scout.logging import get_logger
 from scene_scout.models.event import NormalizedEvent
@@ -317,11 +322,6 @@ async def _stub_feed_scout(run_id: str) -> tuple[list[Any], list[Any]]:
     return [], []
 
 
-async def _stub_description_quality(events: list[Any], run_id: str) -> list[Any]:
-    """Stub for Description Quality Agent."""
-    return []
-
-
 def _apply_pre_enrichment_filter(events: list[Any]) -> list[Any]:
     """Stub pre-enrichment filter applied by the orchestrator."""
     return []
@@ -423,7 +423,7 @@ class Orchestrator:
         deduplicated = await deduplication.run(normalized, run_id)
         result.deduplicated_events = len(deduplicated)
 
-        quality_scored = await _stub_description_quality(deduplicated, run_id)
+        quality_scored = await description_quality.run(deduplicated, run_id)
         result.after_description_quality = len(quality_scored)
 
         filtered = _apply_pre_enrichment_filter(quality_scored)
