@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from scene_scout.agents import event_extraction, event_normalization
+from scene_scout.agents import deduplication, event_extraction, event_normalization
 from scene_scout.config import vol_pipeline_state_dir
 from scene_scout.logging import get_logger
 from scene_scout.models.event import NormalizedEvent
@@ -317,11 +317,6 @@ async def _stub_feed_scout(run_id: str) -> tuple[list[Any], list[Any]]:
     return [], []
 
 
-async def _stub_deduplication(events: list[Any], run_id: str) -> list[Any]:
-    """Stub for Deduplication Agent."""
-    return []
-
-
 async def _stub_description_quality(events: list[Any], run_id: str) -> list[Any]:
     """Stub for Description Quality Agent."""
     return []
@@ -425,7 +420,7 @@ class Orchestrator:
         normalized = cached_events + newly_normalized
         result.normalized_events = len(normalized)
 
-        deduplicated = await _stub_deduplication(normalized, run_id)
+        deduplicated = await deduplication.run(normalized, run_id)
         result.deduplicated_events = len(deduplicated)
 
         quality_scored = await _stub_description_quality(deduplicated, run_id)
