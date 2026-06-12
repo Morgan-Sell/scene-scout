@@ -104,7 +104,7 @@ uv run python -m scene_scout.cli uat --prompt "jazz and outdoor events" --dry-ru
 Copy `.env.example` to `.env` for local configuration. Use `--dry-run` to run the
 pipeline without sending email. Full UAT with a real inbox is a manual release gate.
 
-**CI:** GitHub Actions runs ruff and pytest on every push/PR (`.github/workflows/ci.yml`).
+**CI:** GitHub Actions runs ruff, pytest with coverage (80% floor), and posts a coverage table on PRs (`.github/workflows/ci.yml`).
 
 **Deploy:** Production target is Modal (scheduled pipeline + Gradio endpoint) — Phase 11,
 not yet implemented. Local dev uses `docker-compose` for container parity.

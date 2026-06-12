@@ -12,6 +12,9 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,7 +37,18 @@ jobs:
         run: uv run ruff format --check scene_scout tests
 
       - name: Run tests
-        run: uv run pytest
+        run: |
+          uv run pytest \
+            --cov=scene_scout \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80
         env:
           # CI runs unit/integration tests only — no live LLM or email.
           DRY_RUN: "true"
+
+      - name: Pytest coverage comment
+        if: github.event_name == 'pull_request'
+        uses: MishaKav/pytest-coverage-comment@v1
+        with:
+          pytest-xml-coverage-path: ./coverage.xml
