@@ -24,6 +24,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=7.1",       # Coverage reporting in CI and local dev
     "respx>=0.21",           # HTTP mocking for tests
     "ruff>=0.15",            # Lint and format
 ]
@@ -47,3 +48,4 @@ include = ["scene_scout*"]
 
 [tool.setuptools.package-data]
 scene_scout = ["prompts/*.txt"]
+
