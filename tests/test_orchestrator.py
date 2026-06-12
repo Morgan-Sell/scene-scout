@@ -239,6 +239,9 @@ async def test_orchestrator_run_returns_zero_counts(pipeline_state_dir: Path) ->
     assert result.deduplicated_events == 0
     assert result.after_description_quality == 0
     assert result.after_pre_enrichment_filter == 0
+    assert result.pre_enrichment_discard_low_information == 0
+    assert result.pre_enrichment_discard_outside_week == 0
+    assert result.pre_enrichment_discard_exclude_window == 0
     assert result.enriched_events == 0
     assert result.ranked_events == 0
     assert result.after_sellout_risk == 0

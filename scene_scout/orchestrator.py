@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,10 +24,15 @@ from scene_scout.agents import (
     event_extraction,
     event_normalization,
 )
-from scene_scout.config import vol_pipeline_state_dir
+from scene_scout.agents.event_normalization import is_within_normalization_window
+from scene_scout.config import vol_history_dir, vol_pipeline_state_dir
 from scene_scout.logging import get_logger
 from scene_scout.models.event import NormalizedEvent
 from scene_scout.models.feed import RawFeedEntry
+from scene_scout.pre_enrichment_filter_config import (
+    PRE_ENRICHMENT_COMING_WEEK_DAYS,
+    PRE_ENRICHMENT_HARD_EXCLUDE_DAYS,
+)
 from scene_scout.services.cache import CacheService
 
 _PIPELINE_STATE_FILENAME = "pipeline_state.json"
@@ -123,6 +128,12 @@ class PipelineResult:
         Events returned by the Description Quality Agent.
     after_pre_enrichment_filter : int
         Events that passed the pre-enrichment filter.
+    pre_enrichment_discard_low_information : int
+        Events discarded for ``low_information=True``.
+    pre_enrichment_discard_outside_week : int
+        Events discarded for falling outside the coming-week window.
+    pre_enrichment_discard_exclude_window : int
+        Events discarded for appearing in the 2-week recommendation exclude window.
     enriched_events : int
         Events returned after enrichment batch application.
     ranked_events : int
@@ -147,6 +158,9 @@ class PipelineResult:
     deduplicated_events: int = 0
     after_description_quality: int = 0
     after_pre_enrichment_filter: int = 0
+    pre_enrichment_discard_low_information: int = 0
+    pre_enrichment_discard_outside_week: int = 0
+    pre_enrichment_discard_exclude_window: int = 0
     enriched_events: int = 0
     ranked_events: int = 0
     after_sellout_risk: int = 0
@@ -307,6 +321,152 @@ def _store_seen_entries_after_normalization(
         )
 
 
+DISCARD_LOW_INFORMATION = "low_information"
+DISCARD_OUTSIDE_WEEK = "outside_coming_week"
+DISCARD_EXCLUDE_WINDOW = "in_exclude_window"
+
+
+@dataclass
+class PreEnrichmentFilterResult:
+    """Outcome of the pre-enrichment filter."""
+
+    events: list[NormalizedEvent]
+    discards: dict[str, int]
+
+    @property
+    def total_discarded(self) -> int:
+        return sum(self.discards.values())
+
+
+def _load_hard_exclude_event_ids(
+    *,
+    now: datetime,
+    exclude_days: int = PRE_ENRICHMENT_HARD_EXCLUDE_DAYS,
+) -> set[str]:
+    """Return event IDs recommended within the hard-exclude window.
+
+    Reads ``vol-history/hard_exclude_index.json`` when present. Phase 7.2 replaces
+    this lightweight index with the full recommendation history service.
+    """
+    index_path = vol_history_dir() / "hard_exclude_index.json"
+    if not index_path.is_file():
+        return set()
+
+    payload = json.loads(index_path.read_text(encoding="utf-8"))
+    entries = payload.get("entries", [])
+    cutoff = now - timedelta(days=exclude_days)
+    excluded: set[str] = set()
+
+    for entry in entries:
+        event_id = entry.get("event_id")
+        recommended_at_raw = entry.get("recommended_at")
+        if not event_id or not recommended_at_raw:
+            continue
+        recommended_at = datetime.fromisoformat(
+            str(recommended_at_raw).replace("Z", "+00:00")
+        )
+        if recommended_at.astimezone(timezone.utc) >= cutoff.astimezone(timezone.utc):
+            excluded.add(str(event_id))
+
+    return excluded
+
+
+def _pre_enrichment_discard_reason(
+    event: NormalizedEvent,
+    *,
+    now: datetime,
+    exclude_event_ids: set[str],
+) -> str | None:
+    """Return a discard reason or ``None`` when the event should proceed."""
+    if event.low_information:
+        return DISCARD_LOW_INFORMATION
+    if event.id in exclude_event_ids:
+        return DISCARD_EXCLUDE_WINDOW
+    if not is_within_normalization_window(
+        event.start_datetime,
+        now=now,
+        window_days=PRE_ENRICHMENT_COMING_WEEK_DAYS,
+    ):
+        return DISCARD_OUTSIDE_WEEK
+    return None
+
+
+def apply_pre_enrichment_filter(
+    events: list[NormalizedEvent],
+    run_id: str,
+    *,
+    now: datetime | None = None,
+    exclude_event_ids: set[str] | None = None,
+) -> PreEnrichmentFilterResult:
+    """Filter events before enrichment.
+
+    Discards records that are low-information, outside the coming week, or within
+    the hard recommendation exclude window.
+
+    Parameters
+    ----------
+    events : list[NormalizedEvent]
+        Description-quality-scored events.
+    run_id : str
+        Pipeline run identifier for logging.
+    now : datetime, optional
+        Reference time for date-window checks.
+    exclude_event_ids : set[str], optional
+        Event IDs to hard-exclude; loaded from history when omitted.
+
+    Returns
+    -------
+    PreEnrichmentFilterResult
+        Passing events and per-reason discard counts.
+    """
+    logger = get_logger("orchestrator", run_id=run_id)
+    reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    excluded_ids = (
+        exclude_event_ids
+        if exclude_event_ids is not None
+        else _load_hard_exclude_event_ids(now=reference)
+    )
+
+    discards = {
+        DISCARD_LOW_INFORMATION: 0,
+        DISCARD_OUTSIDE_WEEK: 0,
+        DISCARD_EXCLUDE_WINDOW: 0,
+    }
+    passing: list[NormalizedEvent] = []
+
+    for event in events:
+        reason = _pre_enrichment_discard_reason(
+            event,
+            now=reference,
+            exclude_event_ids=excluded_ids,
+        )
+        if reason is None:
+            passing.append(event)
+            continue
+
+        discards[reason] += 1
+        logger.info(
+            "Pre-enrichment filter discard: %s",
+            event.title,
+            data={
+                "event_id": event.id,
+                "reason": reason,
+                "start_datetime": event.start_datetime.isoformat(),
+                "low_information": event.low_information,
+            },
+        )
+
+    logger.info(
+        "Pre-enrichment filter complete",
+        data={
+            "input_count": len(events),
+            "passed_count": len(passing),
+            "discards": discards,
+        },
+    )
+    return PreEnrichmentFilterResult(events=passing, discards=discards)
+
+
 # ---------------------------------------------------------------------------
 # Agent stubs — replaced by real agents in later phases
 # ---------------------------------------------------------------------------
@@ -320,11 +480,6 @@ async def _stub_user_preference(prompt: str, run_id: str) -> dict[str, Any]:
 async def _stub_feed_scout(run_id: str) -> tuple[list[Any], list[Any]]:
     """Stub for Feed Scout Agent."""
     return [], []
-
-
-def _apply_pre_enrichment_filter(events: list[Any]) -> list[Any]:
-    """Stub pre-enrichment filter applied by the orchestrator."""
-    return []
 
 
 async def _stub_enrichment(events: list[Any], run_id: str) -> list[Any]:
@@ -426,10 +581,22 @@ class Orchestrator:
         quality_scored = await description_quality.run(deduplicated, run_id)
         result.after_description_quality = len(quality_scored)
 
-        filtered = _apply_pre_enrichment_filter(quality_scored)
+        filter_result = apply_pre_enrichment_filter(quality_scored, run_id)
+        filtered = filter_result.events
         result.after_pre_enrichment_filter = len(filtered)
+        result.pre_enrichment_discard_low_information = filter_result.discards[
+            DISCARD_LOW_INFORMATION
+        ]
+        result.pre_enrichment_discard_outside_week = filter_result.discards[
+            DISCARD_OUTSIDE_WEEK
+        ]
+        result.pre_enrichment_discard_exclude_window = filter_result.discards[
+            DISCARD_EXCLUDE_WINDOW
+        ]
 
-        state.filtered_events = []
+        state.filtered_events = [
+            event.model_dump(mode="json") for event in filtered
+        ]
         state.phase = "batch_submitted"
         write_pipeline_state(state)
         logger.info(
@@ -472,6 +639,12 @@ class Orchestrator:
                 "seen_entries_cache_hits": result.seen_entries_cache_hits,
                 "seen_entries_cache_misses": result.seen_entries_cache_misses,
                 "seen_entries_hit_rate_pct": result.seen_entries_hit_rate_pct,
+                "after_pre_enrichment_filter": result.after_pre_enrichment_filter,
+                "pre_enrichment_discards": {
+                    "low_information": result.pre_enrichment_discard_low_information,
+                    "outside_coming_week": result.pre_enrichment_discard_outside_week,
+                    "in_exclude_window": result.pre_enrichment_discard_exclude_window,
+                },
                 "curated_recommendations": result.curated_recommendations,
             },
         )

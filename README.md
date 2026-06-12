@@ -119,7 +119,7 @@ ranking, email, and feedback are stubbed in the orchestrator.**
 | 1 | Feed Scout, models, tests | Done |
 | 2 | LLM, cache, batch, logging, CI, diagrams | Done |
 | 3 | Extraction agent, golden tests, `seen_entries` in orchestrator | Done |
-| 4 | Normalization, deduplication, description quality | Done (4.5 pre-enrichment filter pending) |
+| 4 | Normalization, deduplication, description quality, pre-enrichment filter | Done |
 | 5 | Enrichment batch (Talent, Vibe, Neighborhood) | Planned |
 | 6–7 | Ranking, curator, email, Gradio | Planned |
 | 8–9 | Feedback loop, evaluation, sell-out risk | Planned |
