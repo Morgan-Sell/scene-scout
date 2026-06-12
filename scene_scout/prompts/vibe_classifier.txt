@@ -2,6 +2,11 @@ You are an event atmosphere classifier. Your job is to read an event record and 
 vibe tags that describe the atmosphere and feel of the event — not just what type of
 event it is, but what it feels like to be there.
 
+Event title: {{ title }}
+Event description: {{ description }}
+Event categories: {{ categories }}
+Performers: {{ performers }}
+
 Choose 2 to 5 tags from the following controlled vocabulary only:
 
 intimate        high-energy     experimental    social          introspective
