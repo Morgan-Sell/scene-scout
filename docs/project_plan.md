@@ -246,6 +246,34 @@ the performer-named signal.
 outside coming week, in 2-week exclude window. Discard counts logged by reason and
 included in UAT summary.
 
+### 4.6 — CI Coverage Reporting
+**Files:** `pyproject.toml` (extend), `.github/workflows/ci.yml` (extend)
+**Done when:**
+- `pytest-cov` added to `pyproject.toml` dev dependencies
+- `ci.yml` pytest step updated to run with coverage flags:
+  `pytest --cov=scene_scout --cov-report=xml --cov-report=term-missing`
+- `MishaKav/pytest-coverage-comment` action added as a step after pytest; reads
+  `coverage.xml` and posts a formatted coverage table as a PR comment; comment is
+  updated (not duplicated) on subsequent pushes to the same PR
+- `permissions: pull-requests: write` set on the workflow job
+- `minimum-coverage: 80` threshold configured on the action; build passes at current
+  coverage level (threshold enforced from this subphase forward)
+- `coverage.xml` and `.coverage` added to `.gitignore`
+- Coverage report is visible on a test PR: summary table shows per-file statement
+  counts, missing lines, and overall percentage
+
+**Rationale:** Phase 4 completes the deterministic core of the pipeline
+(Phases 1–4: feed ingestion, extraction, normalization, deduplication, description
+quality, pre-enrichment filter). This is the right moment to establish a coverage
+baseline before Phase 5 expands the test surface with enrichment agents, geocoding,
+and batch orchestration. Every Phase 5+ PR will automatically surface coverage gaps
+as they are introduced.
+
+**Note on threshold:** 80% is the enforced floor from this point forward. The initial
+baseline after 4.5 may be below 80% for files like `orchestrator.py` that are harder
+to unit test in isolation — review the first report and adjust the threshold to the
+actual baseline, then raise it incrementally as coverage improves.
+
 ---
 
 ## Phase 5 — Enrichment Pipeline
@@ -349,13 +377,49 @@ all 9 components:
 - On explanation `LLMValidationError`: fallback explanation used; logged as warning
 - All score component weights are named constants in `config.py`
 
-### 6.6 — Feedback Token Infrastructure
+### 6.6 — Database Migration Infrastructure (Alembic)
+**Files:** `pyproject.toml` (extend), `alembic.ini`, `alembic/env.py`,
+`alembic/versions/0001_initial_feedback_history_schema.py`,
+`scene_scout/db/models.py`, `scene_scout/db/__init__.py`
+**Done when:**
+- `sqlalchemy` and `alembic` added to `pyproject.toml` dependencies
+- `alembic init alembic` scaffold is in place with `alembic.ini` at project root
+- `scene_scout/db/models.py` declares `feedback_events` and `recommendation_history`
+  tables as SQLAlchemy `Table` objects (Core, not ORM); matches the schemas that
+  6.7 will implement
+- `alembic/env.py` reads `DATABASE_FEEDBACK_URL` and `DATABASE_HISTORY_URL` from
+  environment (defaulting to `vol-feedback/feedback.db` and `vol-history/history.db`)
+  and configures SQLite batch mode (`render_as_batch=True`)
+- Initial migration `0001_initial_feedback_history_schema.py` generated via
+  `alembic revision --autogenerate` and verified clean
+- `alembic upgrade head` runs without error against a fresh database
+- `alembic downgrade base` runs without error (rollback verified)
+- A `run_migrations()` helper in `scene_scout/db/__init__.py` calls
+  `alembic upgrade head` programmatically; called by the orchestrator at startup
+- Unit test confirms `run_migrations()` is idempotent (safe to call on every startup)
+
+**Note on cache.db:** The existing `vol-cache/cache.db` (Phase 2.8) is **not**
+migrated to Alembic. Its schema is stable and managed by `cache_schema.py`. Only
+the feedback and history stores — which will evolve with the feedback loop — are
+Alembic-managed. If `cache.db` schema changes are needed in the future, migrate it
+then.
+
+**SQLite batch mode:** Alembic's `batch_alter_table` context manager is required for
+SQLite schema changes (SQLite does not support `ALTER COLUMN` or `DROP COLUMN`
+directly). Always use it:
+```python
+with op.batch_alter_table("feedback_events") as batch_op:
+    batch_op.add_column(sa.Column("dwell_seconds", sa.Integer()))
+```
+
+### 6.7 — Feedback Token Infrastructure
 **Files:** `scene_scout/services/feedback.py`, `scene_scout/services/history.py`
 **Done when:** `generate_feedback_token()` returns a UUID. `FeedbackEvent` schema
 validated. `history.write_recommendations()` and `history.get_recent()` work correctly
-against SQLite. `feedback.log_signal()` writes to `vol-feedback`.
+against SQLite (schema created via Alembic migration from 6.6 — do not call
+`CREATE TABLE` directly). `feedback.log_signal()` writes to `vol-feedback`.
 
-### 6.7 — Ranking Tests
+### 6.8 — Ranking Tests
 **Files:** `tests/agents/test_ranking.py`, `tests/fixtures/golden/ranking/`
 **Done when:** Unit tests cover: deterministic scoring with fixed inputs, `source_coverage`
 calculation for 1/2/3-source events, score component isolation, wildcard slot assignment,
@@ -555,6 +619,8 @@ invoke). Does not send email or call LLM providers.
 | Feedback endpoint rate limiting | Known gap; acceptable for single-user | Post-launch |
 | LLM model for Evaluation Agent | Open — smaller model TBD | 9 |
 | Sell-out risk ML model design | Defer to Phase 9 | 9 |
+| CI coverage reporting (pytest-cov + PR comment) | Planned | 4.6 |
+| Database migrations (Alembic) | Planned | 6.6 |
 | GitHub Actions CI (pytest on PR) | Planned | 2.10 |
 | Modal deploy + CD workflow | Planned — after Phase 7 | 11 |
 | Full UAT in CI | ✗ Not planned — manual release gate | 7, 11 |
