@@ -22,7 +22,8 @@ from scene_scout.cache_config import (
     VENUE_GEO_TTL_DAYS,
     VIBE_TTL_DAYS,
 )
-from scene_scout.models.event import NormalizedEvent, PerformerInfo, VenueCacheEntry
+from scene_scout.models.enrichment import PerformerInfo
+from scene_scout.models.event import NormalizedEvent, VenueCacheEntry
 from scene_scout.services.cache import CacheService
 from tests.conftest import TEST_RUN_ID
 
