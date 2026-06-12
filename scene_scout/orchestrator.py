@@ -594,9 +594,7 @@ class Orchestrator:
             DISCARD_EXCLUDE_WINDOW
         ]
 
-        state.filtered_events = [
-            event.model_dump(mode="json") for event in filtered
-        ]
+        state.filtered_events = [event.model_dump(mode="json") for event in filtered]
         state.phase = "batch_submitted"
         write_pipeline_state(state)
         logger.info(

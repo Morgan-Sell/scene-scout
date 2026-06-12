@@ -124,8 +124,9 @@ def test_apply_pre_enrichment_filter_discards_exclude_window_event_ids() -> None
     assert result.discards[DISCARD_EXCLUDE_WINDOW] == 1
 
 
-def test_apply_pre_enrichment_filter_low_information_takes_priority_over_exclude(
-) -> None:
+def test_apply_pre_enrichment_filter_low_information_takes_priority_over_exclude() -> (
+    None
+):
     result = apply_pre_enrichment_filter(
         [_event(low_information=True, description_quality_score=0.1)],
         TEST_RUN_ID,
