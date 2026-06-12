@@ -53,7 +53,8 @@ def _event(**overrides: object) -> NormalizedEvent:
         "city": "Los Angeles",
         "url": "https://example.com/benny-night",
         "is_free": True,
-        "description": "Featuring Benny Rodriguez at the sandlot under the floodlights.",
+        "description": "Featuring Benny Rodriguez at the sandlot \
+            under the floodlights.",
         "categories": ["Sports"],
         "source_feeds": [SANDLOT_FEED],
         "source_count": 1,
