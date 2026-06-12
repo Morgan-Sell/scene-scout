@@ -65,6 +65,11 @@ def write_summary_json(output_dir: Path, result: PipelineResult) -> Path:
         "deduplicated_events": result.deduplicated_events,
         "after_description_quality": result.after_description_quality,
         "after_pre_enrichment_filter": result.after_pre_enrichment_filter,
+        "pre_enrichment_discards": {
+            "low_information": result.pre_enrichment_discard_low_information,
+            "outside_coming_week": result.pre_enrichment_discard_outside_week,
+            "in_exclude_window": result.pre_enrichment_discard_exclude_window,
+        },
         "enriched_events": result.enriched_events,
         "ranked_events": result.ranked_events,
         "after_sellout_risk": result.after_sellout_risk,

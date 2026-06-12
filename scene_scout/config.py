@@ -45,6 +45,11 @@ def vol_cache_dir() -> Path:
     return _vol_dir("VOL_CACHE_DIR", "vol-cache")
 
 
+def vol_history_dir() -> Path:
+    """Return the directory for recommendation history storage."""
+    return _vol_dir("VOL_HISTORY_DIR", "vol-history")
+
+
 def load_feed_configs(path: Path = _FEEDS_CONFIG_PATH) -> list[FeedConfig]:
     """
     Load and validate feed configurations from feeds.yaml.

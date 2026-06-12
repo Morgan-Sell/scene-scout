@@ -73,6 +73,7 @@ def test_write_summary_json_writes_pipeline_counts(tmp_path: Path) -> None:
     assert summary["seen_entries_cache_hits"] == 3
     assert summary["seen_entries_cache_misses"] == 7
     assert summary["seen_entries_hit_rate_pct"] == 30.0
+    assert summary["pre_enrichment_discards"]["low_information"] == 0
 
 
 @pytest.mark.asyncio
