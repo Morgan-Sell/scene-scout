@@ -11,6 +11,11 @@ from scene_scout.services.batch import (
     get_batch_strategy,
 )
 from scene_scout.services.cache import CacheService
+from scene_scout.services.geocoding import (
+    geocode_venue,
+    get_nearby_pois,
+    venue_cache_key,
+)
 from scene_scout.services.llm import (
     LLMInfrastructureError,
     LLMValidationError,
@@ -30,6 +35,9 @@ __all__ = [
     "LLMInfrastructureError",
     "LLMValidationError",
     "complete",
+    "geocode_venue",
     "get_batch_strategy",
+    "get_nearby_pois",
     "render_prompt",
+    "venue_cache_key",
 ]
