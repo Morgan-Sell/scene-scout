@@ -25,7 +25,8 @@ from scene_scout.cache_config import (
 )
 from scene_scout.config import vol_cache_dir
 from scene_scout.logging import get_logger
-from scene_scout.models.event import NormalizedEvent, PerformerInfo, VenueCacheEntry
+from scene_scout.models.enrichment import PerformerInfo
+from scene_scout.models.event import NormalizedEvent, VenueCacheEntry
 from scene_scout.services.cache_schema import SCHEMA_STATEMENTS
 
 

@@ -131,17 +131,6 @@ class NormalizedEvent(BaseModel):
         return value
 
 
-class PerformerInfo(BaseModel):
-    """Performer enrichment payload stored in ``performer_cache``."""
-
-    name: str
-    entity_type: str
-    genre_tags: list[str] = Field(default_factory=list)
-    one_line_summary: str | None = None
-    confidence: float = 0.0
-    affinity_score: float = 0.0
-
-
 class VenueCacheEntry(BaseModel):
     """Partial venue cache read — fields may be ``None`` when their TTL has expired."""
 
