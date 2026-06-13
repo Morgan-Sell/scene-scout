@@ -11,6 +11,7 @@ shape.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
@@ -23,17 +24,25 @@ from scene_scout.agents import (
     description_quality,
     event_extraction,
     event_normalization,
+    neighborhood_scout,
+    talent_scout,
+    vibe_classifier,
 )
+from scene_scout.agents.description_quality import has_named_performer
 from scene_scout.agents.event_normalization import is_within_normalization_window
 from scene_scout.config import vol_history_dir, vol_pipeline_state_dir
 from scene_scout.logging import get_logger
+from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.event import NormalizedEvent
 from scene_scout.models.feed import RawFeedEntry
+from scene_scout.orchestrator_config import ENRICHMENT_BATCH_POLL_INTERVAL_SECONDS
 from scene_scout.pre_enrichment_filter_config import (
     PRE_ENRICHMENT_COMING_WEEK_DAYS,
     PRE_ENRICHMENT_HARD_EXCLUDE_DAYS,
 )
+from scene_scout.services.batch import BatchRequest, BatchResults, get_batch_strategy
 from scene_scout.services.cache import CacheService
+from scene_scout.services.geocoding import venue_cache_key
 
 _PIPELINE_STATE_FILENAME = "pipeline_state.json"
 
@@ -56,6 +65,10 @@ class PipelineState:
         dicts until ``NormalizedEvent`` is wired in Phase 4.
     batch_id : str, optional
         Provider batch job identifier once enrichment batch is submitted.
+    neighborhood_jobs : list[dict[str, Any]]
+        Serialized neighborhood scout jobs prepared during Phase 1 geocoding.
+    stated_interests : list[str]
+        User interest strings forwarded to the Talent Scout batch prompts.
     phase : str
         Current pipeline phase.
     """
@@ -63,6 +76,8 @@ class PipelineState:
     run_id: str
     filtered_events: list[dict[str, Any]] = field(default_factory=list)
     batch_id: str | None = None
+    neighborhood_jobs: list[dict[str, Any]] = field(default_factory=list)
+    stated_interests: list[str] = field(default_factory=list)
     phase: PipelinePhase = "phase_1"
 
     def to_json(self) -> str:
@@ -94,6 +109,8 @@ class PipelineState:
             run_id=payload["run_id"],
             filtered_events=payload.get("filtered_events", []),
             batch_id=payload.get("batch_id"),
+            neighborhood_jobs=payload.get("neighborhood_jobs", []),
+            stated_interests=payload.get("stated_interests", []),
             phase=payload.get("phase", "phase_1"),
         )
 
@@ -467,6 +484,218 @@ def apply_pre_enrichment_filter(
     return PreEnrichmentFilterResult(events=passing, discards=discards)
 
 
+def _batch_custom_id(agent_name: str, event_id: str) -> str:
+    """Return a unique batch ``custom_id`` for one agent and event."""
+    return f"{agent_name}:{event_id}"
+
+
+def _batch_results_for_agent(
+    batch_results: BatchResults,
+    agent_name: str,
+) -> BatchResults:
+    """Extract one agent's batch items and restore bare event IDs."""
+    prefix = f"{agent_name}:"
+    items = [
+        item.model_copy(update={"custom_id": item.custom_id.removeprefix(prefix)})
+        for item in batch_results.results
+        if item.custom_id.startswith(prefix)
+    ]
+    return BatchResults(
+        batch_id=batch_results.batch_id,
+        status=batch_results.status,
+        results=items,
+    )
+
+
+def _serialize_neighborhood_job(
+    job: neighborhood_scout.NeighborhoodScoutJob,
+) -> dict[str, Any]:
+    coordinates = job.coordinates
+    return {
+        "event": job.event.model_dump(mode="json"),
+        "venue_key": job.venue_key,
+        "mode": job.mode,
+        "poi_list": job.poi_list,
+        "coordinates": list(coordinates) if coordinates is not None else None,
+    }
+
+
+def _deserialize_neighborhood_job(
+    payload: dict[str, Any],
+) -> neighborhood_scout.NeighborhoodScoutJob:
+    raw_coordinates = payload.get("coordinates")
+    return neighborhood_scout.NeighborhoodScoutJob(
+        event=EnrichedEvent.model_validate(payload["event"]),
+        venue_key=str(payload["venue_key"]),
+        mode=payload["mode"],
+        poi_list=payload.get("poi_list", []),
+        coordinates=tuple(raw_coordinates) if raw_coordinates else None,
+    )
+
+
+def _stated_interests_from_prompt(prompt: str) -> list[str]:
+    """Extract stated interests for Talent Scout prompts."""
+    stripped = prompt.strip()
+    if not stripped:
+        return []
+    return [stripped]
+
+
+async def _collect_enrichment_batch_requests(
+    filtered: list[NormalizedEvent],
+    *,
+    cache: CacheService,
+    stated_interests: list[str] | None,
+    run_id: str,
+) -> tuple[list[BatchRequest], list[neighborhood_scout.NeighborhoodScoutJob]]:
+    """Build one combined batch request list for all enrichment agents."""
+    requests: list[BatchRequest] = []
+    neighborhood_jobs: list[neighborhood_scout.NeighborhoodScoutJob] = []
+
+    for event in filtered:
+        if has_named_performer(event.title, event.description):
+            if (
+                talent_scout.resolve_performers_from_cache(
+                    event.title,
+                    event.description,
+                    cache,
+                )
+                is None
+            ):
+                talent_request = talent_scout.build_batch_request(
+                    event,
+                    stated_interests,
+                )
+                requests.append(
+                    talent_request.model_copy(
+                        update={
+                            "custom_id": _batch_custom_id(
+                                "talent_scout",
+                                event.id,
+                            )
+                        }
+                    )
+                )
+
+        vibe_key = vibe_classifier.compute_vibe_content_hash(
+            event.description,
+            event.categories,
+        )
+        if cache.get_vibe(vibe_key) is None:
+            vibe_request = vibe_classifier.build_batch_request(
+                EnrichedEvent.from_normalized(event)
+            )
+            requests.append(
+                vibe_request.model_copy(
+                    update={"custom_id": _batch_custom_id("vibe_classifier", event.id)}
+                )
+            )
+
+        enriched = EnrichedEvent.from_normalized(event)
+        venue_key = venue_cache_key(event.venue, event.city)
+        if neighborhood_scout.resolve_neighborhood_from_cache(venue_key, cache) is None:
+            job = await neighborhood_scout.prepare_neighborhood_job(
+                enriched,
+                cache=cache,
+                run_id=run_id,
+            )
+            neighborhood_jobs.append(job)
+            neighborhood_request = neighborhood_scout.build_batch_request(job)
+            requests.append(
+                neighborhood_request.model_copy(
+                    update={
+                        "custom_id": _batch_custom_id(
+                            "neighborhood_scout",
+                            event.id,
+                        )
+                    }
+                )
+            )
+
+    return requests, neighborhood_jobs
+
+
+async def _poll_enrichment_batch(
+    batch_id: str,
+    *,
+    run_id: str,
+) -> BatchResults:
+    """Poll provider batch status every five minutes until completion."""
+    logger = get_logger("orchestrator", run_id=run_id)
+    strategy = get_batch_strategy()
+
+    while True:
+        results = await strategy.poll(batch_id)
+        if results.status != "processing":
+            logger.info(
+                "Enrichment batch polling complete",
+                data={"batch_id": batch_id, "status": results.status},
+            )
+            return results
+
+        logger.info(
+            "Enrichment batch still processing; sleeping",
+            data={
+                "batch_id": batch_id,
+                "poll_interval_seconds": ENRICHMENT_BATCH_POLL_INTERVAL_SECONDS,
+            },
+        )
+        await asyncio.sleep(ENRICHMENT_BATCH_POLL_INTERVAL_SECONDS)
+
+
+async def _apply_enrichment_batch(
+    filtered: list[NormalizedEvent],
+    batch_results: BatchResults,
+    neighborhood_jobs: list[neighborhood_scout.NeighborhoodScoutJob],
+    stated_interests: list[str] | None,
+    *,
+    cache: CacheService,
+    run_id: str,
+) -> list[EnrichedEvent]:
+    """Apply a completed enrichment batch through all three agents."""
+    logger = get_logger("orchestrator", run_id=run_id)
+
+    if batch_results.status == "failed":
+        logger.warning(
+            "Enrichment batch failed; applying empty agent fallbacks",
+            data={"batch_id": batch_results.batch_id},
+        )
+
+    talent_results = _batch_results_for_agent(batch_results, "talent_scout")
+    vibe_results = _batch_results_for_agent(batch_results, "vibe_classifier")
+    neighborhood_results = _batch_results_for_agent(
+        batch_results,
+        "neighborhood_scout",
+    )
+
+    after_talent = await talent_scout.run(
+        filtered,
+        stated_interests,
+        run_id,
+        cache=cache,
+        batch_results=talent_results,
+    )
+    after_vibe = await vibe_classifier.run(
+        after_talent,
+        run_id,
+        cache=cache,
+        batch_results=vibe_results,
+    )
+    enriched = await neighborhood_scout.run(
+        after_vibe,
+        run_id,
+        cache=cache,
+        batch_results=neighborhood_results,
+        prepared_jobs=neighborhood_jobs if neighborhood_jobs else None,
+    )
+
+    logger.info(
+        "Enrichment batch applied",
+        data={"enriched_events": len(enriched)},
+    )
+    return enriched
+
+
 # ---------------------------------------------------------------------------
 # Agent stubs — replaced by real agents in later phases
 # ---------------------------------------------------------------------------
@@ -480,11 +709,6 @@ async def _stub_user_preference(prompt: str, run_id: str) -> dict[str, Any]:
 async def _stub_feed_scout(run_id: str) -> tuple[list[Any], list[Any]]:
     """Stub for Feed Scout Agent."""
     return [], []
-
-
-async def _stub_enrichment(events: list[Any], run_id: str) -> list[Any]:
-    """Stub for enrichment batch application (Talent, Vibe, Neighborhood)."""
-    return []
 
 
 async def _stub_ranking(events: list[Any], run_id: str) -> list[Any]:
@@ -594,21 +818,69 @@ class Orchestrator:
             DISCARD_EXCLUDE_WINDOW
         ]
 
+        stated_interests = _stated_interests_from_prompt(prompt)
+        batch_requests, neighborhood_jobs = await _collect_enrichment_batch_requests(
+            filtered,
+            cache=cache,
+            stated_interests=stated_interests,
+            run_id=run_id,
+        )
+
+        if batch_requests:
+            strategy = get_batch_strategy()
+            batch_id = await strategy.submit(batch_requests, run_id=run_id)
+            batch_results = await _poll_enrichment_batch(batch_id, run_id=run_id)
+        else:
+            batch_id = None
+            batch_results = BatchResults(
+                batch_id="",
+                status="completed",
+                results=[],
+            )
+            logger.info(
+                "No enrichment batch requests required; skipping provider submit",
+                data={"filtered_events": len(filtered)},
+            )
+
         state.filtered_events = [event.model_dump(mode="json") for event in filtered]
+        state.batch_id = batch_id
+        state.neighborhood_jobs = [
+            _serialize_neighborhood_job(job) for job in neighborhood_jobs
+        ]
+        state.stated_interests = stated_interests
         state.phase = "batch_submitted"
         write_pipeline_state(state)
         logger.info(
             "Phase 1 complete; pipeline state persisted",
-            data={"filtered_events": result.after_pre_enrichment_filter},
+            data={
+                "filtered_events": result.after_pre_enrichment_filter,
+                "batch_id": batch_id,
+                "batch_requests": len(batch_requests),
+            },
         )
 
         resumed = read_pipeline_state()
-        if resumed is not None:
-            state = resumed
+        if resumed is None:
+            raise RuntimeError("Pipeline state missing at enrichment phase boundary")
+        state = resumed
         state.phase = "phase_2"
         write_pipeline_state(state)
 
-        enriched = await _stub_enrichment(filtered, run_id)
+        filtered_events = [
+            NormalizedEvent.model_validate(payload) for payload in state.filtered_events
+        ]
+        restored_jobs = [
+            _deserialize_neighborhood_job(payload)
+            for payload in state.neighborhood_jobs
+        ]
+        enriched = await _apply_enrichment_batch(
+            filtered_events,
+            batch_results,
+            restored_jobs,
+            state.stated_interests,
+            cache=cache,
+            run_id=run_id,
+        )
         result.enriched_events = len(enriched)
 
         ranked = await _stub_ranking(enriched, run_id)
