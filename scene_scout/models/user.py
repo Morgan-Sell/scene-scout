@@ -1,0 +1,65 @@
+"""
+User domain models for SceneScout.
+
+``UserProfile`` is the persisted taste profile written by the User Preference Agent
+and consumed by Ranking, the Recommendation Curator, and Email Composer.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel, Field, field_validator
+
+from scene_scout.vibe_classifier_config import VIBE_VOCABULARY
+
+
+class UserProfile(BaseModel):
+    """Structured user taste profile for ranking and curation."""
+
+    user_id: str
+    name: str
+    email: str
+    stated_interests: list[str] = Field(default_factory=list)
+    stated_dislikes: list[str] = Field(default_factory=list)
+    preferred_neighborhoods: list[str] = Field(default_factory=list)
+    max_travel_minutes: int | None = None
+    budget_ceiling_cents: int | None = None
+    excluded_categories: list[str] = Field(default_factory=list)
+    category_weights: dict[str, float] = Field(default_factory=dict)
+    vibe_preferences: list[str] = Field(default_factory=list)
+    created_at: datetime
+    last_updated: datetime
+    profile_version: int = 1
+
+    @field_validator("category_weights")
+    @classmethod
+    def _validate_category_weights(cls, value: dict[str, float]) -> dict[str, float]:
+        for weight in value.values():
+            if not 0.0 <= weight <= 1.0:
+                raise ValueError("category_weights values must be between 0.0 and 1.0")
+        return value
+
+    @field_validator("vibe_preferences")
+    @classmethod
+    def _validate_vibe_preferences(cls, value: list[str]) -> list[str]:
+        invalid = sorted(set(value) - VIBE_VOCABULARY)
+        if invalid:
+            raise ValueError(
+                f"vibe_preferences must use controlled vocabulary; invalid: {invalid}"
+            )
+        return value
+
+    @field_validator("max_travel_minutes", "budget_ceiling_cents")
+    @classmethod
+    def _validate_non_negative_optional(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("must be non-negative when set")
+        return value
+
+    @field_validator("profile_version")
+    @classmethod
+    def _validate_profile_version(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("profile_version must be at least 1")
+        return value
