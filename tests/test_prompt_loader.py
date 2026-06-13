@@ -82,3 +82,16 @@ def test_render_prompt_event_extraction_requires_entry() -> None:
     """Event extraction template injects a RawFeedEntry."""
     with pytest.raises(jinja2.UndefinedError):
         render_prompt("event_extraction")
+
+
+def test_render_prompt_user_preference_parse_injects_onboarding_context() -> None:
+    result = render_prompt(
+        "user_preference_parse",
+        user_name="Morgan",
+        email="morgan@example.com",
+        user_prompt="Jazz and outdoor events in Silver Lake.",
+    )
+
+    assert "Morgan" in result
+    assert "morgan@example.com" in result
+    assert "Jazz and outdoor events in Silver Lake." in result

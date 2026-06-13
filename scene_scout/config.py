@@ -50,6 +50,11 @@ def vol_history_dir() -> Path:
     return _vol_dir("VOL_HISTORY_DIR", "vol-history")
 
 
+def vol_profiles_dir() -> Path:
+    """Return the directory for persisted user profile JSON."""
+    return _vol_dir("VOL_PROFILES_DIR", "vol-profiles")
+
+
 def load_feed_configs(path: Path = _FEEDS_CONFIG_PATH) -> list[FeedConfig]:
     """
     Load and validate feed configurations from feeds.yaml.

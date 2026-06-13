@@ -9,9 +9,57 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from scene_scout.vibe_classifier_config import VIBE_VOCABULARY
+
+
+def _validate_category_weights_dict(value: dict[str, float]) -> dict[str, float]:
+    for weight in value.values():
+        if not 0.0 <= weight <= 1.0:
+            raise ValueError("category_weights values must be between 0.0 and 1.0")
+    return value
+
+
+def _validate_vibe_preference_list(value: list[str]) -> list[str]:
+    invalid = sorted(set(value) - VIBE_VOCABULARY)
+    if invalid:
+        raise ValueError(
+            f"vibe_preferences must use controlled vocabulary; invalid: {invalid}"
+        )
+    return value
+
+
+class UserProfileParseLLMOutput(BaseModel):
+    """Fields returned by the LLM during cold-start profile parsing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stated_interests: list[str] = Field(default_factory=list)
+    stated_dislikes: list[str] = Field(default_factory=list)
+    preferred_neighborhoods: list[str] = Field(default_factory=list)
+    max_travel_minutes: int | None = None
+    budget_ceiling_cents: int | None = None
+    excluded_categories: list[str] = Field(default_factory=list)
+    category_weights: dict[str, float] = Field(default_factory=dict)
+    vibe_preferences: list[str] = Field(default_factory=list)
+
+    @field_validator("category_weights")
+    @classmethod
+    def _validate_category_weights(cls, value: dict[str, float]) -> dict[str, float]:
+        return _validate_category_weights_dict(value)
+
+    @field_validator("vibe_preferences")
+    @classmethod
+    def _validate_vibe_preferences(cls, value: list[str]) -> list[str]:
+        return _validate_vibe_preference_list(value)
+
+    @field_validator("max_travel_minutes", "budget_ceiling_cents")
+    @classmethod
+    def _validate_non_negative_optional(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("must be non-negative when set")
+        return value
 
 
 class UserProfile(BaseModel):
@@ -35,20 +83,12 @@ class UserProfile(BaseModel):
     @field_validator("category_weights")
     @classmethod
     def _validate_category_weights(cls, value: dict[str, float]) -> dict[str, float]:
-        for weight in value.values():
-            if not 0.0 <= weight <= 1.0:
-                raise ValueError("category_weights values must be between 0.0 and 1.0")
-        return value
+        return _validate_category_weights_dict(value)
 
     @field_validator("vibe_preferences")
     @classmethod
     def _validate_vibe_preferences(cls, value: list[str]) -> list[str]:
-        invalid = sorted(set(value) - VIBE_VOCABULARY)
-        if invalid:
-            raise ValueError(
-                f"vibe_preferences must use controlled vocabulary; invalid: {invalid}"
-            )
-        return value
+        return _validate_vibe_preference_list(value)
 
     @field_validator("max_travel_minutes", "budget_ceiling_cents")
     @classmethod

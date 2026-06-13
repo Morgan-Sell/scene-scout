@@ -1,27 +1,33 @@
 You are parsing a user's event preference prompt into a structured profile.
 
-Read the user's prompt carefully and extract the following:
-- stated_interests: A list of event types, genres, artists, activities, or themes they like
-- stated_dislikes: A list of event types, venues, or experiences they dislike or want to avoid
-- preferred_neighborhoods: A list of neighborhoods or areas they prefer or are based in
-- max_travel_minutes: An integer estimate of how far they are willing to travel (in minutes),
-                      or null if not specified
-- budget_ceiling_cents: Their maximum ticket price in cents, or null if not specified
-- excluded_categories: A list of category labels that should never appear in recommendations
-                       (hard constraints derived from stated dislikes)
-- category_weights: A dict of category labels to initial float weights (0.0–1.0) based on
-                    how strongly they expressed interest. Start at 0.7 for mentioned interests,
-                    0.3 for neutral, 0.0 for excluded.
-- vibe_preferences: A list of vibe tags from the controlled vocabulary that match their
-                    expressed preferences.
+Read the user's prompt carefully and return a single JSON object with exactly these keys:
+
+- stated_interests (array of strings): Event types, genres, artists, activities, or themes they like
+- stated_dislikes (array of strings): Event types, venues, or experiences they dislike or want to avoid
+- preferred_neighborhoods (array of strings): Neighborhoods or areas they prefer or are based in
+- max_travel_minutes (integer or null): How far they are willing to travel in minutes, or null if not specified
+- budget_ceiling_cents (integer or null): Maximum ticket price in cents, or null if not specified
+- excluded_categories (array of strings): Category labels that should never appear in recommendations
+- category_weights (object): Map of category labels to float weights from 0.0 to 1.0 based on expressed interest.
+  Use about 0.7 for mentioned interests, 0.3 for neutral, and 0.0 for excluded categories.
+- vibe_preferences (array of strings): Vibe tags from the controlled vocabulary that match their preferences
 
 Vibe vocabulary: intimate | high-energy | experimental | social | introspective |
 outdoor | late-night | family-friendly | industry | touristy | immersive |
-underground | high-production | free-spirited | niche
+underground | high-production | free-spirited | niche | single-friendly |
+pretentious | exclusive | inclusive
 
 Rules:
 - Only extract what is present or clearly implied in the prompt.
 - Do not invent preferences not expressed or implied.
-- For excluded_categories, be conservative — only hard-exclude what the user explicitly
-  dislikes or rules out.
+- For excluded_categories, be conservative — only hard-exclude what the user explicitly dislikes or rules out.
 - Return only valid JSON matching the schema. No preamble, no explanation.
+
+--- Onboarding context ---
+
+User name: {{ user_name }}
+User email: {{ email }}
+
+--- User's preference prompt ---
+
+{{ user_prompt }}
