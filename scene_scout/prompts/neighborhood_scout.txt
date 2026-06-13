@@ -5,12 +5,14 @@ You have been given a list of nearby places sourced from map data — these are 
 places within approximately 1 km of the venue. Use them as your source of truth.
 Do not invent or recall additional businesses beyond what is listed.
 
-Venue: {venue}
-City: {city}
-Event time: {event_time}
+Venue: {{ venue }}
+City: {{ city }}
+Neighborhood (if known): {{ neighborhood }}
+Event time: {{ event_time }}
+Classification mode: {{ mode }}
 
 Nearby places within 15–20 min walk:
-{poi_list}
+{{ poi_list }}
 
 Write 2–4 sentences covering:
 1. What the immediate area feels like (one sentence — character, energy, safety if relevant)
@@ -19,6 +21,8 @@ Write 2–4 sentences covering:
 
 Rules:
 - Only reference places from the poi_list above. Do not invent names.
+- In llm-fallback mode, write a brief honest general note about the neighborhood
+  character only — do not recommend specific places.
 - If poi_list is empty, write a brief honest general note about the neighborhood
   character only — do not recommend specific places.
 - Do not use tourism-brochure language. Be direct and useful.
