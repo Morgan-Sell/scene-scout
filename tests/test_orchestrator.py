@@ -6,13 +6,14 @@ cache integration.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 from scene_scout.logging import get_logger
+from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.event import (
     EventCandidate,
     EventCandidateLLMOutput,
@@ -23,7 +24,11 @@ from scene_scout.orchestrator import (
     Orchestrator,
     PipelineResult,
     PipelineState,
+    PreEnrichmentFilterResult,
+    _batch_custom_id,
+    _batch_results_for_agent,
     _partition_entries_by_seen_cache,
+    _poll_enrichment_batch,
     _seen_entries_hit_rate_pct,
     _store_seen_entries_after_normalization,
     clear_pipeline_state,
@@ -31,6 +36,7 @@ from scene_scout.orchestrator import (
     read_pipeline_state,
     write_pipeline_state,
 )
+from scene_scout.services.batch import BatchRequest, BatchResultItem, BatchResults
 from scene_scout.services.cache import CacheService
 from tests.conftest import TEST_RUN_ID
 
@@ -377,4 +383,154 @@ async def test_orchestrator_persists_state_during_run(
     assert captured_phases == ["batch_submitted", "phase_2"]
 
     # Final on-disk state cleared after success
+    assert read_pipeline_state() is None
+
+
+def test_batch_custom_id_and_split_results() -> None:
+    custom_id = _batch_custom_id("vibe_classifier", "sandlot-game-1993")
+    batch_results = BatchResults(
+        batch_id="batch-1",
+        status="completed",
+        results=[
+            BatchResultItem(
+                custom_id="talent_scout:sandlot-game-1993",
+                content='{"performers": []}',
+                success=True,
+            ),
+            BatchResultItem(
+                custom_id="vibe_classifier:sandlot-game-1993",
+                content='{"vibe_tags": ["outdoor", "social"]}',
+                success=True,
+            ),
+        ],
+    )
+
+    assert custom_id == "vibe_classifier:sandlot-game-1993"
+    vibe_only = _batch_results_for_agent(batch_results, "vibe_classifier")
+
+    assert len(vibe_only.results) == 1
+    assert vibe_only.results[0].custom_id == "sandlot-game-1993"
+
+
+@pytest.mark.asyncio
+async def test_poll_enrichment_batch_waits_between_polls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr("scene_scout.orchestrator.asyncio.sleep", sleep_mock)
+    poll_mock = AsyncMock(
+        side_effect=[
+            BatchResults(batch_id="batch-1", status="processing"),
+            BatchResults(batch_id="batch-1", status="completed", results=[]),
+        ]
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.get_batch_strategy",
+        lambda: type("Strategy", (), {"poll": poll_mock})(),
+    )
+
+    results = await _poll_enrichment_batch("batch-1", run_id=TEST_RUN_ID)
+
+    assert results.status == "completed"
+    sleep_mock.assert_awaited_once()
+    assert poll_mock.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_writes_batch_id_to_pipeline_state(
+    pipeline_state_dir: Path,
+    cache_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    future_start = datetime.now(timezone.utc) + timedelta(days=3)
+    filtered_event = _normalized_event(
+        start_datetime=future_start,
+        description_quality_score=0.8,
+        low_information=False,
+    )
+    batch_request = BatchRequest(
+        custom_id="vibe_classifier:sandlot-game-1993",
+        prompt="Classify the sandlot vibe.",
+        system="Return JSON.",
+        agent_name="vibe_classifier",
+    )
+    completed_batch = BatchResults(
+        batch_id="batch-sandlot-1993",
+        status="completed",
+        results=[
+            BatchResultItem(
+                custom_id="vibe_classifier:sandlot-game-1993",
+                content='{"vibe_tags": ["outdoor", "social"]}',
+                success=True,
+            )
+        ],
+    )
+
+    monkeypatch.setattr(
+        "scene_scout.orchestrator._collect_enrichment_batch_requests",
+        AsyncMock(return_value=([batch_request], [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator._poll_enrichment_batch",
+        AsyncMock(return_value=completed_batch),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.get_batch_strategy",
+        lambda: type(
+            "Strategy",
+            (),
+            {"submit": AsyncMock(return_value="batch-sandlot-1993")},
+        )(),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator._apply_enrichment_batch",
+        AsyncMock(
+            return_value=[EnrichedEvent.from_normalized(filtered_event)],
+        ),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.deduplication.run",
+        AsyncMock(return_value=[filtered_event]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.description_quality.run",
+        AsyncMock(return_value=[filtered_event]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.apply_pre_enrichment_filter",
+        lambda events, run_id, **kwargs: PreEnrichmentFilterResult(
+            events=[filtered_event],
+            discards={
+                "low_information": 0,
+                "outside_coming_week": 0,
+                "in_exclude_window": 0,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.CacheService",
+        lambda run_id, db_path=None: CacheService(run_id=run_id, db_path=cache_db),
+    )
+
+    captured_states: list[PipelineState] = []
+
+    def capture_write(state: PipelineState) -> None:
+        captured_states.append(
+            PipelineState.from_json(state.to_json()),
+        )
+        write_pipeline_state(state)
+
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.write_pipeline_state",
+        capture_write,
+    )
+
+    result = await Orchestrator().run(SANDLOT_PROMPT)
+
+    assert result.enriched_events == 1
+    batch_submitted = next(
+        state for state in captured_states if state.phase == "batch_submitted"
+    )
+    assert batch_submitted.batch_id == "batch-sandlot-1993"
+    assert len(batch_submitted.filtered_events) == 1
     assert read_pipeline_state() is None
