@@ -55,6 +55,11 @@ def vol_profiles_dir() -> Path:
     return _vol_dir("VOL_PROFILES_DIR", "vol-profiles")
 
 
+def vol_chroma_dir() -> Path:
+    """Return the directory for the Chroma liked-events vector index."""
+    return _vol_dir("VOL_CHROMA_DIR", "vol-chroma")
+
+
 def load_feed_configs(path: Path = _FEEDS_CONFIG_PATH) -> list[FeedConfig]:
     """
     Load and validate feed configurations from feeds.yaml.
