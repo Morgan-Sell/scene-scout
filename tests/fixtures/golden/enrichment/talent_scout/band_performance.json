@@ -1,0 +1,37 @@
+{
+  "fixture_id": "band_performance",
+  "description": "Music band named as the headlining act.",
+  "event": {
+    "id": "f7d07e4ebe1acab39293382dbabc35a8b3502bb10942238cafe9c0bd2d451822",
+    "title": "The Jetsetters at the Sandlot",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/jetsetters",
+    "is_free": false,
+    "description": "Featuring The Jetsetters bringing live music to the sandlot after the game.",
+    "categories": ["Music"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.75,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00"
+  },
+  "stated_interests": ["live music"],
+  "llm_output": {
+    "performers": [
+      {
+        "name": "The Jetsetters",
+        "entity_type": "band",
+        "genre_tags": ["indie-rock"],
+        "one_line_summary": "Sandlot house band",
+        "confidence": 0.9,
+        "affinity_score": 0.72
+      }
+    ]
+  },
+  "expect_batch_call": true,
+  "expected_performer_names": ["The Jetsetters"],
+  "expected_top_performer_affinity": 0.72
+}

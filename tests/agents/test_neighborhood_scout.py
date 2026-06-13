@@ -7,7 +7,10 @@ batch application, and end-to-end run() with mocked geocoding and batch.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -28,6 +31,22 @@ from scene_scout.services.batch import (
 from scene_scout.services.cache import CacheService
 from scene_scout.services.geocoding import venue_cache_key
 from tests.conftest import TEST_RUN_ID
+
+GOLDEN_DIR = (
+    Path(__file__).parent.parent
+    / "fixtures"
+    / "golden"
+    / "enrichment"
+    / "neighborhood_scout"
+)
+
+GOLDEN_FIXTURE_NAMES = [
+    "mode_a_geocoded_venue",
+    "mode_b_geocode_failure",
+    "low_confidence_context",
+    "venue_cache_hit",
+    "validation_error_response",
+]
 
 SANDLOT_FEED = "sandlot-pickup-league"
 START = datetime(2025, 6, 7, 18, 0, tzinfo=timezone.utc)
@@ -79,6 +98,27 @@ def _enriched_event(**overrides: object) -> EnrichedEvent:
     if overrides:
         return base.model_copy(update=overrides)
     return base
+
+
+def _load_golden(name: str) -> dict:
+    return json.loads((GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def _enriched_event_from_golden(data: dict) -> EnrichedEvent:
+    return EnrichedEvent.from_normalized(
+        NormalizedEvent.model_validate(data["event"]),
+    )
+
+
+def _mock_litellm_response(content: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        ),
+    )
 
 
 @pytest.fixture
@@ -310,3 +350,106 @@ async def test_run_submits_mode_b_batch_when_geocoding_fails(
     assert enriched[0].neighborhood_context == (
         "A relaxed suburban pocket with a nearby cafe."
     )
+
+
+@pytest.mark.asyncio
+async def test_apply_batch_results_returns_empty_on_validation_error(
+    cache: CacheService,
+) -> None:
+    event = _enriched_event()
+    job = neighborhood_scout.NeighborhoodScoutJob(
+        event=event,
+        venue_key=VENUE_KEY,
+        mode=MODE_GEO_ASSISTED,
+        poi_list=POIS,
+        coordinates=COORDINATES,
+    )
+    batch_results = BatchResults(
+        batch_id="batch-1",
+        status="completed",
+        results=[
+            BatchResultItem(
+                custom_id=event.id,
+                content='{"context": "missing required keys"}',
+                success=True,
+            )
+        ],
+    )
+
+    enriched = await neighborhood_scout.apply_batch_results(
+        [job],
+        batch_results,
+        cache=cache,
+        run_id=TEST_RUN_ID,
+    )
+
+    assert enriched[0].neighborhood_context is None
+    assert enriched[0].neighborhood_confidence == 0.0
+
+
+@pytest.mark.parametrize("fixture_name", GOLDEN_FIXTURE_NAMES)
+@pytest.mark.asyncio
+async def test_golden_fixture_neighborhood_scout(
+    fixture_name: str,
+    cache: CacheService,
+) -> None:
+    """Regression: golden event types yield expected Neighborhood Scout behavior."""
+    golden = _load_golden(fixture_name)
+    event = _enriched_event_from_golden(golden)
+    venue_key = venue_cache_key(event.venue, event.city)
+    mock_strategy = AsyncMock()
+
+    if golden.get("uses_cache"):
+        cache.set_venue(
+            venue_key,
+            coordinates=tuple(golden["cached_coordinates"]),
+            neighborhood_context=golden["cached_context"],
+            neighborhood_confidence=golden["cached_confidence"],
+        )
+        enriched = await neighborhood_scout.run(
+            [event],
+            TEST_RUN_ID,
+            cache=cache,
+            batch_strategy=mock_strategy,
+        )
+        mock_strategy.submit.assert_not_called()
+    else:
+        geocode_result = golden.get("geocode_result")
+        geocode_coords = tuple(geocode_result) if geocode_result else None
+        llm_json = json.dumps(golden["llm_output"])
+        mock_completion = AsyncMock(
+            return_value=_mock_litellm_response(llm_json),
+        )
+        with (
+            patch(
+                "scene_scout.agents.neighborhood_scout.geocode_venue",
+                AsyncMock(return_value=geocode_coords),
+            ),
+            patch(
+                "scene_scout.agents.neighborhood_scout.get_nearby_pois",
+                AsyncMock(return_value=golden.get("poi_list", [])),
+            ),
+            patch(
+                "scene_scout.services.batch.litellm.acompletion",
+                mock_completion,
+            ),
+        ):
+            enriched = await neighborhood_scout.run(
+                [event],
+                TEST_RUN_ID,
+                cache=cache,
+                batch_strategy=ConcurrentBatchStrategy(model="gpt-4o-mini"),
+            )
+        mock_completion.assert_awaited_once()
+
+    assert enriched[0].neighborhood_context == golden["expected_neighborhood_context"]
+    assert (
+        enriched[0].neighborhood_confidence
+        == golden["expected_neighborhood_confidence"]
+    )
+
+
+def test_golden_fixtures_directory_has_five_representative_types() -> None:
+    fixture_files = sorted(GOLDEN_DIR.glob("*.json"))
+    assert len(fixture_files) == 5
+    assert [path.stem for path in fixture_files] == sorted(GOLDEN_FIXTURE_NAMES)

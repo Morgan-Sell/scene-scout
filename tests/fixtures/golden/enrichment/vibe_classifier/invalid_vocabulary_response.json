@@ -1,0 +1,26 @@
+{
+  "fixture_id": "invalid_vocabulary_response",
+  "description": "LLM returns tags outside the controlled vocabulary; agent falls back to empty tags.",
+  "event": {
+    "id": "e91654158492054debde680d169bb668676356c9f1586a7258c6a9f1298eff48",
+    "title": "Legends Under the Lights",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/legends-lights",
+    "is_free": true,
+    "description": "Legends retell the Great Bambino story under the floodlights.",
+    "categories": ["Legends"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.8,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00",
+    "performers": []
+  },
+  "llm_output": {
+    "vibe_tags": ["outdoor", "mystery-vibe", "nostalgic"]
+  },
+  "expected_vibe_tags": []
+}

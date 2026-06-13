@@ -7,8 +7,11 @@ degradation, tag distribution logging, and end-to-end run() with mocked batch.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -22,6 +25,22 @@ from scene_scout.services.batch import (
 )
 from scene_scout.services.cache import CacheService
 from tests.conftest import TEST_RUN_ID
+
+GOLDEN_DIR = (
+    Path(__file__).parent.parent
+    / "fixtures"
+    / "golden"
+    / "enrichment"
+    / "vibe_classifier"
+)
+
+GOLDEN_FIXTURE_NAMES = [
+    "outdoor_sports_event",
+    "intimate_acoustic_event",
+    "family_friendly_event",
+    "late_night_dance_event",
+    "invalid_vocabulary_response",
+]
 
 SANDLOT_FEED = "sandlot-pickup-league"
 START = datetime(2025, 6, 7, 18, 0, tzinfo=timezone.utc)
@@ -61,6 +80,25 @@ def _enriched_event(**overrides: object) -> EnrichedEvent:
     if overrides:
         return base.model_copy(update=overrides)
     return base
+
+
+def _load_golden(name: str) -> dict:
+    return json.loads((GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def _enriched_event_from_golden(data: dict) -> EnrichedEvent:
+    return EnrichedEvent.model_validate(data["event"])
+
+
+def _mock_litellm_response(content: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        ),
+    )
 
 
 @pytest.fixture
@@ -242,3 +280,63 @@ async def test_run_submits_uncached_events_to_batch_strategy(
 
     assert enriched[0].vibe_tags == ["outdoor", "high-energy", "social"]
     assert enriched[0].performers[0].name == "Benny Rodriguez"
+
+
+@pytest.mark.parametrize("fixture_name", GOLDEN_FIXTURE_NAMES)
+@pytest.mark.asyncio
+async def test_golden_fixture_vibe_classifier(
+    fixture_name: str,
+    cache: CacheService,
+) -> None:
+    """Regression: each golden event type yields expected Vibe Classifier behavior."""
+    golden = _load_golden(fixture_name)
+    event = _enriched_event_from_golden(golden)
+    llm_json = json.dumps(golden["llm_output"])
+    mock_completion = AsyncMock(
+        return_value=_mock_litellm_response(llm_json),
+    )
+
+    with patch(
+        "scene_scout.services.batch.litellm.acompletion",
+        mock_completion,
+    ):
+        enriched = await vibe_classifier.run(
+            [event],
+            TEST_RUN_ID,
+            cache=cache,
+            batch_strategy=ConcurrentBatchStrategy(model="gpt-4o-mini"),
+        )
+
+    assert enriched[0].vibe_tags == golden["expected_vibe_tags"]
+    mock_completion.assert_awaited_once()
+
+
+def test_golden_fixtures_directory_has_five_representative_types() -> None:
+    fixture_files = sorted(GOLDEN_DIR.glob("*.json"))
+    assert len(fixture_files) == 5
+    assert [path.stem for path in fixture_files] == sorted(GOLDEN_FIXTURE_NAMES)
+
+
+@pytest.mark.asyncio
+async def test_run_calls_batch_submit_on_cache_miss(cache: CacheService) -> None:
+    """Cache miss should invoke the batch strategy LLM path."""
+    event = _enriched_event()
+    mock_completion = AsyncMock(
+        return_value=_mock_litellm_response(
+            '{"vibe_tags": ["outdoor", "social", "high-energy"]}'
+        ),
+    )
+
+    with patch(
+        "scene_scout.services.batch.litellm.acompletion",
+        mock_completion,
+    ):
+        enriched = await vibe_classifier.run(
+            [event],
+            TEST_RUN_ID,
+            cache=cache,
+            batch_strategy=ConcurrentBatchStrategy(model="gpt-4o-mini"),
+        )
+
+    assert enriched[0].vibe_tags == ["outdoor", "social", "high-energy"]
+    mock_completion.assert_awaited_once()

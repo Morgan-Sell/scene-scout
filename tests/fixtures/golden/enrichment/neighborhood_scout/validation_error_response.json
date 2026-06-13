@@ -1,0 +1,33 @@
+{
+  "fixture_id": "validation_error_response",
+  "description": "Malformed LLM JSON degrades gracefully to empty neighborhood fields.",
+  "event": {
+    "id": "457bd1a3b6f860af31c8ff9c4eefa61e36fc899517990551934b324a602fa8b0",
+    "title": "Benny Rodriguez and Smalls Live",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/benny-and-smalls",
+    "is_free": true,
+    "description": "Benny Rodriguez and Smalls on the mound.",
+    "categories": ["Sports"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.8,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00"
+  },
+  "mode": "geocoding-assisted",
+  "coordinates": [34.0522, -118.2437],
+  "poi_list": [
+    {"name": "Treehouse Cafe", "type": "cafe", "lat": 34.0525, "lon": -118.244}
+  ],
+  "geocode_result": [34.0522, -118.2437],
+  "llm_output": {
+    "context": "missing required keys"
+  },
+  "expected_neighborhood_context": null,
+  "expected_neighborhood_confidence": 0.0,
+  "uses_cache": false
+}

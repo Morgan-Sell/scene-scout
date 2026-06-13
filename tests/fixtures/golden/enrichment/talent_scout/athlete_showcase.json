@@ -1,0 +1,37 @@
+{
+  "fixture_id": "athlete_showcase",
+  "description": "Athlete-led clinic with a named instructor.",
+  "event": {
+    "id": "32b0ae066807881d1f606d308c80c801480b0d57db5e9f2bb38197db72e8a7d6",
+    "title": "Baseball Clinic Featuring Benny Rodriguez",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/benny-clinic",
+    "is_free": true,
+    "description": "Join Benny Rodriguez for a youth baseball clinic on stealing bases.",
+    "categories": ["Sports", "Workshop"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.85,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00"
+  },
+  "stated_interests": ["baseball", "youth sports"],
+  "llm_output": {
+    "performers": [
+      {
+        "name": "Benny Rodriguez",
+        "entity_type": "other",
+        "genre_tags": ["baseball", "coaching"],
+        "one_line_summary": "The Jet teaches base stealing",
+        "confidence": 0.97,
+        "affinity_score": 0.91
+      }
+    ]
+  },
+  "expect_batch_call": true,
+  "expected_performer_names": ["Benny Rodriguez"],
+  "expected_top_performer_affinity": 0.91
+}
