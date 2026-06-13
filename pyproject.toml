@@ -18,6 +18,8 @@ dependencies = [
     "jinja2>=3.0",           # Prompt template rendering
     "python-dateutil>=2.9",  # Fuzzy date parsing in normalization
     "rapidfuzz>=3.0",        # Deterministic fuzzy deduplication
+    "chromadb>=0.5",         # Liked-event vector index (vol-chroma)
+    "sentence-transformers>=3.0",  # Local embeddings for semantic similarity
 ]
 
 [project.optional-dependencies]
