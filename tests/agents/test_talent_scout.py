@@ -7,8 +7,11 @@ stripping, validation-error degradation, and end-to-end run() with mocked batch.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -23,6 +26,18 @@ from scene_scout.services.batch import (
 from scene_scout.services.cache import CacheService
 from scene_scout.talent_scout_config import CONFIDENCE_SUMMARY_THRESHOLD
 from tests.conftest import TEST_RUN_ID
+
+GOLDEN_DIR = (
+    Path(__file__).parent.parent / "fixtures" / "golden" / "enrichment" / "talent_scout"
+)
+
+GOLDEN_FIXTURE_NAMES = [
+    "headliner_event",
+    "multi_performer_event",
+    "band_performance",
+    "athlete_showcase",
+    "no_performer_signal",
+]
 
 BENNY_PERFORMER_JSON = (
     '{"performers": [{"name": "Benny Rodriguez", "entity_type": "other", '
@@ -65,6 +80,25 @@ def _event(**overrides: object) -> NormalizedEvent:
     }
     payload.update(overrides)
     return NormalizedEvent.model_validate(payload)
+
+
+def _load_golden(name: str) -> dict:
+    return json.loads((GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def _event_from_golden(data: dict) -> NormalizedEvent:
+    return NormalizedEvent.model_validate(data["event"])
+
+
+def _mock_litellm_response(content: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        ),
+    )
 
 
 @pytest.fixture
@@ -330,3 +364,80 @@ async def test_run_returns_empty_performers_when_no_named_performer_signal(
 
     assert enriched[0].performers == []
     mock_strategy.submit.assert_not_called()
+
+
+@pytest.mark.parametrize("fixture_name", GOLDEN_FIXTURE_NAMES)
+@pytest.mark.asyncio
+async def test_golden_fixture_talent_scout(
+    fixture_name: str,
+    cache: CacheService,
+) -> None:
+    """Regression: each golden event type yields expected Talent Scout behavior."""
+    golden = _load_golden(fixture_name)
+    event = _event_from_golden(golden)
+    stated_interests = golden.get("stated_interests", [])
+    mock_strategy = AsyncMock()
+
+    if golden["expect_batch_call"]:
+        llm_json = json.dumps(golden["llm_output"])
+        mock_completion = AsyncMock(
+            return_value=_mock_litellm_response(llm_json),
+        )
+        with patch(
+            "scene_scout.services.batch.litellm.acompletion",
+            mock_completion,
+        ):
+            enriched = await talent_scout.run(
+                [event],
+                stated_interests,
+                TEST_RUN_ID,
+                cache=cache,
+                batch_strategy=ConcurrentBatchStrategy(model="gpt-4o-mini"),
+            )
+        mock_completion.assert_awaited_once()
+    else:
+        enriched = await talent_scout.run(
+            [event],
+            stated_interests,
+            TEST_RUN_ID,
+            cache=cache,
+            batch_strategy=mock_strategy,
+        )
+        mock_strategy.submit.assert_not_called()
+
+    assert [performer.name for performer in enriched[0].performers] == golden[
+        "expected_performer_names"
+    ]
+    assert (
+        enriched[0].top_performer_affinity == golden["expected_top_performer_affinity"]
+    )
+
+
+def test_golden_fixtures_directory_has_five_representative_types() -> None:
+    fixture_files = sorted(GOLDEN_DIR.glob("*.json"))
+    assert len(fixture_files) == 5
+    assert [path.stem for path in fixture_files] == sorted(GOLDEN_FIXTURE_NAMES)
+
+
+@pytest.mark.asyncio
+async def test_run_calls_batch_submit_on_cache_miss(cache: CacheService) -> None:
+    """Cache miss should invoke the batch strategy LLM path."""
+    event = _event()
+    llm_json = BENNY_PERFORMER_JSON_NO_TAGS
+    mock_completion = AsyncMock(
+        return_value=_mock_litellm_response(llm_json),
+    )
+    with patch(
+        "scene_scout.services.batch.litellm.acompletion",
+        mock_completion,
+    ):
+        enriched = await talent_scout.run(
+            [event],
+            ["baseball"],
+            TEST_RUN_ID,
+            cache=cache,
+            batch_strategy=ConcurrentBatchStrategy(model="gpt-4o-mini"),
+        )
+
+    assert enriched[0].performers[0].name == "Benny Rodriguez"
+    mock_completion.assert_awaited_once()

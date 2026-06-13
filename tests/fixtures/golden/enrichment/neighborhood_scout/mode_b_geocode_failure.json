@@ -1,0 +1,32 @@
+{
+  "fixture_id": "mode_b_geocode_failure",
+  "description": "Geocoding fails; Mode B fallback with empty POI list.",
+  "event": {
+    "id": "04c3140bb4da7bf40b070ad368824b90e54154e5ec5eb0eba53099faf500dd71",
+    "title": "Community Night at the Park",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "Mystery Field",
+    "city": "Los Angeles",
+    "url": "https://example.com/community-night",
+    "is_free": true,
+    "description": "A casual evening at the park.",
+    "categories": ["Community"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.7,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00"
+  },
+  "mode": "llm-fallback",
+  "coordinates": null,
+  "poi_list": [],
+  "geocode_result": null,
+  "llm_output": {
+    "neighborhood_context": "General Los Angeles neighborhood notes only.",
+    "neighborhood_confidence": 0.55
+  },
+  "expected_neighborhood_context": "General Los Angeles neighborhood notes only.",
+  "expected_neighborhood_confidence": 0.55,
+  "uses_cache": false
+}

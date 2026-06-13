@@ -1,0 +1,27 @@
+{
+  "fixture_id": "venue_cache_hit",
+  "description": "Valid neighborhood context already cached; no batch LLM call.",
+  "event": {
+    "id": "a1cf9c5383744b76af226fb1e846a6cf0906df65b0bfd8a40158b54e10251c26",
+    "title": "Sunset Sandlot Game",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/sunset-sandlot-game",
+    "is_free": true,
+    "description": "Pickup baseball under the floodlights.",
+    "categories": ["Sports"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.8,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00"
+  },
+  "uses_cache": true,
+  "cached_context": "Classic suburban sandlot vibes.",
+  "cached_confidence": 0.82,
+  "cached_coordinates": [34.0522, -118.2437],
+  "expected_neighborhood_context": "Classic suburban sandlot vibes.",
+  "expected_neighborhood_confidence": 0.82
+}

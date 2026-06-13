@@ -1,0 +1,26 @@
+{
+  "fixture_id": "family_friendly_event",
+  "description": "All-ages sandlot day with inclusive family programming.",
+  "event": {
+    "id": "0039ce5960f2a7289ad547998e24a8963064406ff7ae48390669fa0185e0e9fb",
+    "title": "Family Day at the Sandlot",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/family-day",
+    "is_free": true,
+    "description": "All-ages games, face painting, and hot dogs for the whole block.",
+    "categories": ["Community", "Family"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.82,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00",
+    "performers": []
+  },
+  "llm_output": {
+    "vibe_tags": ["family-friendly", "inclusive", "social"]
+  },
+  "expected_vibe_tags": ["family-friendly", "inclusive", "social"]
+}

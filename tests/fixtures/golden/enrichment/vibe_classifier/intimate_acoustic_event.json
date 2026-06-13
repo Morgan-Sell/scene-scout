@@ -1,0 +1,26 @@
+{
+  "fixture_id": "intimate_acoustic_event",
+  "description": "Small acoustic set on the bleachers with introspective mood.",
+  "event": {
+    "id": "a2274a10693ce1628042c56254a8b650db1c605da2b551e4c3ccf2c1a3c478b7",
+    "title": "Acoustic Stories on the Bleachers",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/acoustic-stories",
+    "is_free": true,
+    "description": "Quiet acoustic storytelling session after the final inning.",
+    "categories": ["Music", "Storytelling"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.75,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00",
+    "performers": []
+  },
+  "llm_output": {
+    "vibe_tags": ["intimate", "introspective", "chill"]
+  },
+  "expected_vibe_tags": []
+}

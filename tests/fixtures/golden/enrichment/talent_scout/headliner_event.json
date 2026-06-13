@@ -1,0 +1,37 @@
+{
+  "fixture_id": "headliner_event",
+  "description": "Single headliner named in the event description via 'Featuring'.",
+  "event": {
+    "id": "55735e0f2fda54be91b0b16e4f4cc6af8797838964cf6e321cd838d91116e6a9",
+    "title": "Night with Benny Rodriguez",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/benny-night",
+    "is_free": true,
+    "description": "Featuring Benny Rodriguez at the sandlot under the floodlights.",
+    "categories": ["Sports"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.8,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00"
+  },
+  "stated_interests": ["baseball", "legends"],
+  "llm_output": {
+    "performers": [
+      {
+        "name": "Benny Rodriguez",
+        "entity_type": "other",
+        "genre_tags": ["baseball"],
+        "one_line_summary": "The Jet",
+        "confidence": 0.95,
+        "affinity_score": 0.88
+      }
+    ]
+  },
+  "expect_batch_call": true,
+  "expected_performer_names": ["Benny Rodriguez"],
+  "expected_top_performer_affinity": 0.88
+}

@@ -1,0 +1,45 @@
+{
+  "fixture_id": "multi_performer_event",
+  "description": "Two named performers joined by 'and' in the title.",
+  "event": {
+    "id": "457bd1a3b6f860af31c8ff9c4eefa61e36fc899517990551934b324a602fa8b0",
+    "title": "Benny Rodriguez and Smalls Live",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/benny-and-smalls",
+    "is_free": true,
+    "description": "Featuring Benny Rodriguez and Smalls retell sandlot legends on the mound.",
+    "categories": ["Sports", "Legends"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.8,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00"
+  },
+  "stated_interests": ["baseball"],
+  "llm_output": {
+    "performers": [
+      {
+        "name": "Benny Rodriguez",
+        "entity_type": "other",
+        "genre_tags": ["baseball"],
+        "one_line_summary": "The Jet",
+        "confidence": 0.92,
+        "affinity_score": 0.85
+      },
+      {
+        "name": "Smalls",
+        "entity_type": "other",
+        "genre_tags": [],
+        "one_line_summary": "The new kid",
+        "confidence": 0.8,
+        "affinity_score": 0.6
+      }
+    ]
+  },
+  "expect_batch_call": true,
+  "expected_performer_names": ["Benny Rodriguez", "Smalls"],
+  "expected_top_performer_affinity": 0.85
+}

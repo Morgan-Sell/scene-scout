@@ -8,10 +8,11 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from scene_scout.cache_config import SEEN_ENTRIES_TTL_DAYS
 from scene_scout.logging import get_logger
 from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.event import (
@@ -348,6 +349,55 @@ async def test_orchestrator_seen_entries_cache_miss_runs_extraction_and_stores(
 
     entry_hash = compute_entry_hash(source_entry)
     assert cache.get_seen_entry(SANDLOT_FEED_ID, entry_hash) == normalized
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_expired_seen_entry_triggers_re_extraction(
+    pipeline_state_dir: Path,
+    cache_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = CacheService(run_id=TEST_RUN_ID, db_path=cache_db)
+    source_entry = _raw_entry()
+    cached_event = _normalized_event()
+    candidate = _event_candidate()
+    normalized = _normalized_event()
+    entry_hash = compute_entry_hash(source_entry)
+    base = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+
+    with patch("scene_scout.services.cache._utc_now", return_value=base):
+        cache.set_seen_entry(SANDLOT_FEED_ID, entry_hash, cached_event)
+
+    mock_extraction = AsyncMock(return_value=[candidate])
+    monkeypatch.setattr(
+        "scene_scout.orchestrator._stub_feed_scout",
+        AsyncMock(return_value=([source_entry], [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_extraction.run",
+        mock_extraction,
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_normalization.run",
+        AsyncMock(return_value=[normalized]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.CacheService",
+        lambda run_id, db_path=None: cache,
+    )
+
+    with patch(
+        "scene_scout.services.cache._utc_now",
+        return_value=base + timedelta(days=SEEN_ENTRIES_TTL_DAYS, seconds=1),
+    ):
+        result = await Orchestrator().run(SANDLOT_PROMPT)
+        entry_hash = compute_entry_hash(source_entry)
+        assert cache.get_seen_entry(SANDLOT_FEED_ID, entry_hash) == normalized
+
+    assert result.seen_entries_cache_hits == 0
+    assert result.seen_entries_cache_misses == 1
+    assert result.extraction_candidates == 1
+    mock_extraction.assert_awaited_once()
 
 
 @pytest.mark.asyncio

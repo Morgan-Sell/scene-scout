@@ -1,0 +1,26 @@
+{
+  "fixture_id": "late_night_dance_event",
+  "description": "Late-night dance party after the sandlot lights stay on.",
+  "event": {
+    "id": "1c2194ca3104a4d1c30faaf70ac86f49f380bd52eb93e1a7ab36b941912910f4",
+    "title": "Midnight Sandlot Dance Party",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/midnight-dance",
+    "is_free": false,
+    "description": "DJs and dancing under the floodlights until midnight.",
+    "categories": ["Music", "Dance"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.78,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00",
+    "performers": []
+  },
+  "llm_output": {
+    "vibe_tags": ["late-night", "high-energy", "social"]
+  },
+  "expected_vibe_tags": ["late-night", "high-energy", "social"]
+}

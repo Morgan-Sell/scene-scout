@@ -1,0 +1,26 @@
+{
+  "fixture_id": "no_performer_signal",
+  "description": "Community event with no named performer signal; batch should be skipped.",
+  "event": {
+    "id": "04c3140bb4da7bf40b070ad368824b90e54154e5ec5eb0eba53099faf500dd71",
+    "title": "Community Night at the Park",
+    "start_datetime": "2025-06-07T18:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/community-night",
+    "is_free": true,
+    "description": "A casual evening at the park, food vendors, and neighborhood games.",
+    "categories": ["Community"],
+    "source_feeds": ["sandlot-pickup-league"],
+    "source_count": 1,
+    "best_source_feed": "sandlot-pickup-league",
+    "source_quality_score": 0.7,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2025-06-07T18:00:00+00:00"
+  },
+  "stated_interests": [],
+  "llm_output": null,
+  "expect_batch_call": false,
+  "expected_performer_names": [],
+  "expected_top_performer_affinity": 0.0
+}
