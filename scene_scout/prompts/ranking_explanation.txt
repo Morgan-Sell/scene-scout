@@ -4,24 +4,42 @@ recommended to a specific user.
 Write 1 to 2 sentences. Be specific. Cite the actual reasons this event scored well
 for this user — do not write something that could apply to any event.
 
-Event: {event_title}
-Venue: {venue}
-Categories: {categories}
-Vibe tags: {vibe_tags}
-Performers: {performers}
+--- Event ---
 
-Score breakdown:
-{score_breakdown}
+Title: {{ event.title }}
+Venue: {{ event.venue }}{% if event.neighborhood %} ({{ event.neighborhood }}){% endif %}
+City: {{ event.city }}
+Date/time: {{ event.start_datetime }}
+Categories: {% if event.categories %}{{ event.categories | join(", ") }}{% else %}(none){% endif %}
+Vibe tags: {% if event.vibe_tags %}{{ event.vibe_tags | join(", ") }}{% else %}(none){% endif %}
+Performers: {% if event.performers %}{{ event.performers | map(attribute="name") | join(", ") }}{% else %}(none){% endif %}
+Source feeds: {{ event.source_count }} independent listing{% if event.source_count != 1 %}s{% endif %}
+Description: {{ event.description | default("(not provided)", true) }}
+{% if event.neighborhood_context %}
+Neighborhood context: {{ event.neighborhood_context }}
+{% endif %}
 
-User stated interests: {stated_interests}
-User preferred vibes (inferred): {vibe_preferences}
+--- Score breakdown (each component 0.0–1.0) ---
+
+{% for component, value in score_breakdown.items() %}
+- {{ component }}: {{ "%.2f"|format(value) }}
+{% endfor %}
+Total score: {{ "%.2f"|format(total_score) }}
+
+--- User profile signals ---
+
+Stated interests: {% if stated_interests %}{{ stated_interests | join(", ") }}{% else %}(none){% endif %}
+Preferred vibes: {% if vibe_preferences %}{{ vibe_preferences | join(", ") }}{% else %}(none){% endif %}
 
 Rules:
+- Ground the explanation in the score breakdown and event fields above.
 - Reference specific signals: a category match, a vibe alignment, a performer the user
-  would recognize, a neighborhood preference, a novelty signal.
-- Do not write "This event matches your interests." That is a quality failure.
+  would recognize, a neighborhood preference, semantic similarity to past likes, or
+  cross-feed coverage when source_coverage is high.
+- Do not write generic lines like "This event matches your interests." That is a
+  quality failure.
 - Do not invent reasons not supported by the score breakdown or event fields.
-- Do not mention the scoring system, weights, or technical details.
+- Do not mention the scoring system, weights, component names, or other technical details.
 - Write in second person ("you") in a warm, direct tone.
 - Return a JSON object with a single key "explanation" containing the string.
-- Return only valid JSON. No preamble, no explanation.
+- Return only valid JSON. No preamble, no explanation outside the JSON.
