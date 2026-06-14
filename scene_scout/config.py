@@ -101,3 +101,40 @@ LLM_RETRY_BASE_DELAY_SECONDS: float = float(
 DESCRIPTION_QUALITY_THRESHOLD: float = float(
     os.getenv("DESCRIPTION_QUALITY_THRESHOLD", "0.3")
 )
+
+# Ranking — source coverage and component weights (must sum to 1.0).
+SOURCE_COVERAGE_MAX: int = int(os.getenv("SOURCE_COVERAGE_MAX", "3"))
+
+RANKING_WEIGHT_CATEGORY_FIT: float = float(
+    os.getenv("RANKING_WEIGHT_CATEGORY_FIT", "0.20")
+)
+RANKING_WEIGHT_VIBE_FIT: float = float(os.getenv("RANKING_WEIGHT_VIBE_FIT", "0.15"))
+RANKING_WEIGHT_SEMANTIC_SIMILARITY: float = float(
+    os.getenv("RANKING_WEIGHT_SEMANTIC_SIMILARITY", "0.10")
+)
+RANKING_WEIGHT_PERFORMER_AFFINITY: float = float(
+    os.getenv("RANKING_WEIGHT_PERFORMER_AFFINITY", "0.10")
+)
+RANKING_WEIGHT_LOCATION: float = float(os.getenv("RANKING_WEIGHT_LOCATION", "0.10"))
+RANKING_WEIGHT_NOVELTY: float = float(os.getenv("RANKING_WEIGHT_NOVELTY", "0.10"))
+RANKING_WEIGHT_SOURCE_QUALITY: float = float(
+    os.getenv("RANKING_WEIGHT_SOURCE_QUALITY", "0.05")
+)
+RANKING_WEIGHT_SOURCE_COVERAGE: float = float(
+    os.getenv("RANKING_WEIGHT_SOURCE_COVERAGE", "0.05")
+)
+RANKING_WEIGHT_DESCRIPTION_QUALITY: float = float(
+    os.getenv("RANKING_WEIGHT_DESCRIPTION_QUALITY", "0.15")
+)
+
+RANKING_COMPONENT_WEIGHTS: dict[str, float] = {
+    "category_fit": RANKING_WEIGHT_CATEGORY_FIT,
+    "vibe_fit": RANKING_WEIGHT_VIBE_FIT,
+    "semantic_similarity": RANKING_WEIGHT_SEMANTIC_SIMILARITY,
+    "performer_affinity": RANKING_WEIGHT_PERFORMER_AFFINITY,
+    "location": RANKING_WEIGHT_LOCATION,
+    "novelty": RANKING_WEIGHT_NOVELTY,
+    "source_quality": RANKING_WEIGHT_SOURCE_QUALITY,
+    "source_coverage": RANKING_WEIGHT_SOURCE_COVERAGE,
+    "description_quality": RANKING_WEIGHT_DESCRIPTION_QUALITY,
+}
