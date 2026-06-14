@@ -31,6 +31,7 @@ from scene_scout.agents import (
 from scene_scout.agents.description_quality import has_named_performer
 from scene_scout.agents.event_normalization import is_within_normalization_window
 from scene_scout.config import vol_history_dir, vol_pipeline_state_dir
+from scene_scout.db import run_migrations
 from scene_scout.logging import get_logger
 from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.event import NormalizedEvent
@@ -760,6 +761,8 @@ class Orchestrator:
         state = PipelineState(run_id=run_id)
 
         logger.info("Pipeline started", data={"user_prompt_length": len(prompt)})
+
+        run_migrations()
 
         await _stub_user_preference(prompt, run_id)
 
