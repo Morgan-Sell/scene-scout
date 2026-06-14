@@ -7,32 +7,12 @@ round-trips against isolated SQLite files.
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
 from sqlalchemy import create_engine, inspect
 
 from alembic import command
 from scene_scout.db import alembic_config, run_migrations
 from scene_scout.db.models import feedback_events, recommendation_history
 from scene_scout.db.urls import database_feedback_url, database_history_url
-
-
-@pytest.fixture
-def migration_dirs(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> tuple[Path, Path]:
-    """Isolated feedback and history directories for migration tests."""
-    feedback_dir = tmp_path / "vol-feedback"
-    history_dir = tmp_path / "vol-history"
-    feedback_dir.mkdir()
-    history_dir.mkdir()
-    feedback_url = f"sqlite:///{feedback_dir / 'feedback.db'}"
-    history_url = f"sqlite:///{history_dir / 'history.db'}"
-    monkeypatch.setenv("DATABASE_FEEDBACK_URL", feedback_url)
-    monkeypatch.setenv("DATABASE_HISTORY_URL", history_url)
-    return feedback_dir, history_dir
 
 
 def _table_names(database_url: str) -> set[str]:
