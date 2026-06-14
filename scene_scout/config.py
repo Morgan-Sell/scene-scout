@@ -60,6 +60,11 @@ def vol_chroma_dir() -> Path:
     return _vol_dir("VOL_CHROMA_DIR", "vol-chroma")
 
 
+def vol_feedback_dir() -> Path:
+    """Return the directory for the feedback SQLite database."""
+    return _vol_dir("VOL_FEEDBACK_DIR", "vol-feedback")
+
+
 def load_feed_configs(path: Path = _FEEDS_CONFIG_PATH) -> list[FeedConfig]:
     """
     Load and validate feed configurations from feeds.yaml.

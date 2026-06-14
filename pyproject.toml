@@ -20,6 +20,8 @@ dependencies = [
     "rapidfuzz>=3.0",        # Deterministic fuzzy deduplication
     "chromadb>=0.5",         # Liked-event vector index (vol-chroma)
     "sentence-transformers>=3.0",  # Local embeddings for semantic similarity
+    "sqlalchemy>=2.0",         # Feedback and history SQLite stores
+    "alembic>=1.13",           # Schema migrations for feedback/history DBs
 ]
 
 [project.optional-dependencies]
