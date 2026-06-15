@@ -1,0 +1,77 @@
+{
+  "fixture_id": "jazz_lover_weak_match",
+  "profile_key": "jazz_lover",
+  "event_type": "weak_match",
+  "description": "A poor fit that should score well below strong matches.",
+  "profile": {
+    "user_id": "profile-jazz-lover",
+    "name": "Ham Porter",
+    "email": "ham@sandlot.test",
+    "stated_interests": [
+      "jazz",
+      "live music"
+    ],
+    "preferred_neighborhoods": [
+      "Silver Lake"
+    ],
+    "category_weights": {
+      "jazz": 0.9,
+      "rock": 0.2
+    },
+    "vibe_preferences": [
+      "intimate",
+      "outdoor"
+    ],
+    "excluded_categories": [
+      "nightclub"
+    ],
+    "created_at": "2026-06-12T12:00:00+00:00",
+    "last_updated": "2026-06-12T12:00:00+00:00"
+  },
+  "event": {
+    "start_datetime": "2026-06-20T20:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/event",
+    "is_free": false,
+    "description": "Sandlot test event for ranking golden fixtures.",
+    "best_source_feed": "feed_a",
+    "low_information": false,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2026-06-12T12:00:00+00:00",
+    "performers": [],
+    "id": "rank-jazz-weak",
+    "title": "Downtown EDM Festival",
+    "neighborhood": "Downtown",
+    "categories": [
+      "EDM"
+    ],
+    "vibe_tags": [
+      "raucous",
+      "late-night"
+    ],
+    "source_count": 1,
+    "source_feeds": [
+      "feed_a"
+    ],
+    "top_performer_affinity": 0.1,
+    "source_quality_score": 0.3,
+    "description_quality_score": 0.2
+  },
+  "semantic_similarity": 0.0,
+  "previously_recommended_ids": [],
+  "expected_score_breakdown": {
+    "category_fit": 0.0,
+    "vibe_fit": 0.0,
+    "semantic_similarity": 0.0,
+    "performer_affinity": 0.1,
+    "location": 0.0,
+    "novelty": 1.0,
+    "source_quality": 0.3,
+    "source_coverage": 0.3333333333333333,
+    "description_quality": 0.2
+  },
+  "expected_score": 0.17166666666666666,
+  "expected_is_previously_recommended": false,
+  "expected_novelty_penalty_applied": false
+}

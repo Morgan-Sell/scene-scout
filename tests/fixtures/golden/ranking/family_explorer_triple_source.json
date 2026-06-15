@@ -1,0 +1,78 @@
+{
+  "fixture_id": "family_explorer_triple_source",
+  "profile_key": "family_explorer",
+  "event_type": "triple_source",
+  "description": "Listed on three feeds to exercise source_coverage=1.0.",
+  "profile": {
+    "user_id": "profile-family-explorer",
+    "name": "Scotty Smalls",
+    "email": "smalls@sandlot.test",
+    "stated_interests": [
+      "family",
+      "outdoor"
+    ],
+    "preferred_neighborhoods": [
+      "Pasadena"
+    ],
+    "category_weights": {
+      "family": 0.95,
+      "outdoor": 0.8
+    },
+    "vibe_preferences": [
+      "family-friendly",
+      "outdoor"
+    ],
+    "excluded_categories": [],
+    "created_at": "2026-06-12T12:00:00+00:00",
+    "last_updated": "2026-06-12T12:00:00+00:00"
+  },
+  "event": {
+    "start_datetime": "2026-06-20T20:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/event",
+    "is_free": false,
+    "description": "Sandlot test event for ranking golden fixtures.",
+    "best_source_feed": "feed_a",
+    "low_information": false,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2026-06-12T12:00:00+00:00",
+    "performers": [],
+    "id": "rank-family-three-feeds",
+    "title": "Summer Family Fair",
+    "neighborhood": "Pasadena",
+    "categories": [
+      "Family",
+      "Outdoor"
+    ],
+    "vibe_tags": [
+      "family-friendly",
+      "outdoor"
+    ],
+    "source_count": 3,
+    "source_feeds": [
+      "feed_a",
+      "feed_b",
+      "feed_c"
+    ],
+    "top_performer_affinity": 0.55,
+    "source_quality_score": 0.75,
+    "description_quality_score": 0.8
+  },
+  "semantic_similarity": 0.0,
+  "previously_recommended_ids": [],
+  "expected_score_breakdown": {
+    "category_fit": 0.875,
+    "vibe_fit": 1.0,
+    "semantic_similarity": 0.0,
+    "performer_affinity": 0.55,
+    "location": 1.0,
+    "novelty": 1.0,
+    "source_quality": 0.75,
+    "source_coverage": 1.0,
+    "description_quality": 0.8
+  },
+  "expected_score": 0.7875000000000001,
+  "expected_is_previously_recommended": false,
+  "expected_novelty_penalty_applied": false
+}
