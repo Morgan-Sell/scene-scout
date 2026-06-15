@@ -27,6 +27,20 @@ from scene_scout.ranking_config import (
 from scene_scout.services.llm import LLMValidationError
 from tests.conftest import TEST_RUN_ID
 
+GOLDEN_DIR = Path(__file__).parent.parent / "fixtures" / "golden" / "ranking"
+
+PROFILE_KEYS = ("jazz_lover", "family_explorer", "nightlife_seeker")
+EVENT_TYPES = (
+    "strong_match",
+    "weak_match",
+    "single_source",
+    "triple_source",
+    "wildcard_candidate",
+)
+GOLDEN_FIXTURE_NAMES = [
+    f"{profile}_{event_type}" for profile in PROFILE_KEYS for event_type in EVENT_TYPES
+]
+
 PROFILE_TIMESTAMP = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
 EVENT_TIME = datetime(2026, 6, 20, 20, 0, tzinfo=timezone.utc)
 
@@ -81,6 +95,18 @@ def _event(**overrides: object) -> EnrichedEvent:
     }
     payload.update(overrides)
     return EnrichedEvent.model_validate(payload)
+
+
+def _load_golden(name: str) -> dict:
+    return json.loads((GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def _profile_from_golden(data: dict) -> UserProfile:
+    return UserProfile.model_validate(data["profile"])
+
+
+def _event_from_golden(data: dict) -> EnrichedEvent:
+    return EnrichedEvent.model_validate(data["event"])
 
 
 def test_compute_source_coverage_for_one_two_three_sources() -> None:
@@ -280,3 +306,195 @@ def test_load_previously_recommended_event_ids_reads_history_index(
     recent_ids = ranking.load_previously_recommended_event_ids(now=now)
 
     assert recent_ids == {"recent"}
+
+
+def _assert_score_approx(actual: float, expected: float) -> None:
+    assert actual == pytest.approx(expected, abs=1e-6, rel=1e-6)
+
+
+@pytest.mark.parametrize("fixture_name", GOLDEN_FIXTURE_NAMES)
+def test_golden_fixture_deterministic_scoring(fixture_name: str) -> None:
+    """Regression: fixed profile/event pairs yield stable score breakdowns."""
+    golden = _load_golden(fixture_name)
+    profile = _profile_from_golden(golden)
+    event = _event_from_golden(golden)
+    previous_ids = set(golden["previously_recommended_ids"])
+
+    breakdown, is_previous, penalty = ranking.compute_score_breakdown(
+        event,
+        profile,
+        semantic_similarity=golden["semantic_similarity"],
+        previously_recommended_ids=previous_ids,
+    )
+    score = ranking.composite_score(breakdown)
+
+    for component, expected in golden["expected_score_breakdown"].items():
+        _assert_score_approx(breakdown[component], expected)
+    _assert_score_approx(score, golden["expected_score"])
+    assert is_previous is golden["expected_is_previously_recommended"]
+    assert penalty is golden["expected_novelty_penalty_applied"]
+
+
+@pytest.mark.parametrize("profile_key", PROFILE_KEYS)
+def test_golden_source_coverage_isolates_feed_count(profile_key: str) -> None:
+    """Only source_coverage shifts when feed count changes on a fixed event."""
+    golden = _load_golden(f"{profile_key}_single_source")
+    profile = _profile_from_golden(golden)
+    base_event = _event_from_golden(golden)
+    one_feed = base_event.model_copy(
+        update={"source_count": 1, "source_feeds": ["feed_a"]},
+    )
+    two_feeds = base_event.model_copy(
+        update={"source_count": 2, "source_feeds": ["feed_a", "feed_b"]},
+    )
+    three_feeds = base_event.model_copy(
+        update={
+            "source_count": 3,
+            "source_feeds": ["feed_a", "feed_b", "feed_c"],
+        },
+    )
+
+    one_breakdown, _, _ = ranking.compute_score_breakdown(
+        one_feed,
+        profile,
+        semantic_similarity=0.0,
+        previously_recommended_ids=set(),
+    )
+    two_breakdown, _, _ = ranking.compute_score_breakdown(
+        two_feeds,
+        profile,
+        semantic_similarity=0.0,
+        previously_recommended_ids=set(),
+    )
+    three_breakdown, _, _ = ranking.compute_score_breakdown(
+        three_feeds,
+        profile,
+        semantic_similarity=0.0,
+        previously_recommended_ids=set(),
+    )
+
+    assert one_breakdown["source_coverage"] == pytest.approx(1 / SOURCE_COVERAGE_MAX)
+    assert two_breakdown["source_coverage"] == pytest.approx(2 / SOURCE_COVERAGE_MAX)
+    assert three_breakdown["source_coverage"] == pytest.approx(1.0)
+
+    for component in one_breakdown:
+        if component == "source_coverage":
+            continue
+        assert one_breakdown[component] == pytest.approx(two_breakdown[component])
+        assert one_breakdown[component] == pytest.approx(three_breakdown[component])
+
+
+def test_score_component_isolation_category_fit() -> None:
+    """Changing categories affects category_fit without moving unrelated components."""
+    golden = _load_golden("jazz_lover_strong_match")
+    profile = _profile_from_golden(golden)
+    matched = _event_from_golden(golden)
+    mismatched = matched.model_copy(update={"categories": ["Classical"]})
+
+    matched_breakdown, _, _ = ranking.compute_score_breakdown(
+        matched,
+        profile,
+        semantic_similarity=0.0,
+        previously_recommended_ids=set(),
+    )
+    mismatched_breakdown, _, _ = ranking.compute_score_breakdown(
+        mismatched,
+        profile,
+        semantic_similarity=0.0,
+        previously_recommended_ids=set(),
+    )
+
+    assert matched_breakdown["category_fit"] > mismatched_breakdown["category_fit"]
+    for component in matched_breakdown:
+        if component in {"category_fit", "novelty"}:
+            continue
+        assert matched_breakdown[component] == pytest.approx(
+            mismatched_breakdown[component],
+        )
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [f"{profile}_wildcard_candidate" for profile in PROFILE_KEYS],
+)
+def test_golden_wildcard_candidate_is_eligible(fixture_name: str) -> None:
+    """Wildcard golden events sit in the moderate-score band with high novelty."""
+    golden = _load_golden(fixture_name)
+
+    assert golden["expected_wildcard_eligible"] is True
+    assert WILDCARD_SCORE_MIN <= golden["expected_score"] <= WILDCARD_SCORE_MAX
+    assert golden["expected_score_breakdown"]["novelty"] >= WILDCARD_MIN_NOVELTY
+
+
+@pytest.mark.parametrize("profile_key", PROFILE_KEYS)
+def test_golden_wildcard_slot_assignment(profile_key: str) -> None:
+    """assign_wildcard_slots marks golden wildcard candidates across profiles."""
+    golden = _load_golden(f"{profile_key}_wildcard_candidate")
+    top = _load_golden(f"{profile_key}_strong_match")
+    profile = _profile_from_golden(golden)
+    wildcard_event = _event_from_golden(golden)
+    top_event = _event_from_golden(top)
+
+    wildcard_breakdown, _, _ = ranking.compute_score_breakdown(
+        wildcard_event,
+        profile,
+        semantic_similarity=0.0,
+        previously_recommended_ids=set(),
+    )
+    top_breakdown, _, _ = ranking.compute_score_breakdown(
+        top_event,
+        profile,
+        semantic_similarity=0.0,
+        previously_recommended_ids=set(),
+    )
+
+    ranked = [
+        RankedEvent(
+            event=top_event,
+            score=ranking.composite_score(top_breakdown),
+            score_breakdown=top_breakdown,
+            explanation="Top pick.",
+            run_id=TEST_RUN_ID,
+        ),
+        RankedEvent(
+            event=wildcard_event,
+            score=golden["expected_score"],
+            score_breakdown=wildcard_breakdown,
+            explanation="Wildcard candidate.",
+            run_id=TEST_RUN_ID,
+        ),
+    ]
+
+    updated = ranking.assign_wildcard_slots(ranked)
+    flags = {item.event.id: item.wildcard_slot for item in updated}
+
+    assert flags[wildcard_event.id] is True
+    assert flags[top_event.id] is False
+
+
+@pytest.mark.parametrize("fixture_name", GOLDEN_FIXTURE_NAMES)
+@pytest.mark.asyncio
+async def test_golden_fixture_explanation_fallback(fixture_name: str) -> None:
+    """Regression: LLM validation failures fall back to deterministic explanations."""
+    golden = _load_golden(fixture_name)
+    profile = _profile_from_golden(golden)
+    event = _event_from_golden(golden)
+
+    with (
+        patch("scene_scout.agents.ranking.similarity_score", return_value=0.0),
+        patch(
+            "scene_scout.agents.ranking.complete",
+            AsyncMock(side_effect=LLMValidationError("invalid json")),
+        ),
+        patch("scene_scout.agents.ranking.get_liked_events_collection"),
+    ):
+        results = await ranking.run(
+            [event],
+            profile,
+            TEST_RUN_ID,
+            previously_recommended_ids=set(golden["previously_recommended_ids"]),
+        )
+
+    assert len(results) == 1
+    assert results[0].explanation == ranking.fallback_explanation(event)
+    _assert_score_approx(results[0].score, golden["expected_score"])

@@ -1,0 +1,76 @@
+{
+  "fixture_id": "family_explorer_strong_match",
+  "profile_key": "family_explorer",
+  "event_type": "strong_match",
+  "description": "A top pick aligned with the profile's core interests.",
+  "profile": {
+    "user_id": "profile-family-explorer",
+    "name": "Scotty Smalls",
+    "email": "smalls@sandlot.test",
+    "stated_interests": [
+      "family",
+      "outdoor"
+    ],
+    "preferred_neighborhoods": [
+      "Pasadena"
+    ],
+    "category_weights": {
+      "family": 0.95,
+      "outdoor": 0.8
+    },
+    "vibe_preferences": [
+      "family-friendly",
+      "outdoor"
+    ],
+    "excluded_categories": [],
+    "created_at": "2026-06-12T12:00:00+00:00",
+    "last_updated": "2026-06-12T12:00:00+00:00"
+  },
+  "event": {
+    "start_datetime": "2026-06-20T20:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/event",
+    "is_free": false,
+    "description": "Sandlot test event for ranking golden fixtures.",
+    "best_source_feed": "feed_a",
+    "low_information": false,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2026-06-12T12:00:00+00:00",
+    "performers": [],
+    "id": "rank-family-strong",
+    "title": "Pasadena Family Picnic Day",
+    "neighborhood": "Pasadena",
+    "categories": [
+      "Family"
+    ],
+    "vibe_tags": [
+      "family-friendly",
+      "outdoor"
+    ],
+    "source_count": 2,
+    "source_feeds": [
+      "feed_a",
+      "feed_b"
+    ],
+    "top_performer_affinity": 0.5,
+    "source_quality_score": 0.8,
+    "description_quality_score": 0.85
+  },
+  "semantic_similarity": 0.0,
+  "previously_recommended_ids": [],
+  "expected_score_breakdown": {
+    "category_fit": 0.95,
+    "vibe_fit": 1.0,
+    "semantic_similarity": 0.0,
+    "performer_affinity": 0.5,
+    "location": 1.0,
+    "novelty": 1.0,
+    "source_quality": 0.8,
+    "source_coverage": 0.6666666666666666,
+    "description_quality": 0.85
+  },
+  "expected_score": 0.7908333333333334,
+  "expected_is_previously_recommended": false,
+  "expected_novelty_penalty_applied": false
+}

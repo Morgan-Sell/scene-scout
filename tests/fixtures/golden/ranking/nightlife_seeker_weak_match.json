@@ -1,0 +1,75 @@
+{
+  "fixture_id": "nightlife_seeker_weak_match",
+  "profile_key": "nightlife_seeker",
+  "event_type": "weak_match",
+  "description": "A poor fit that should score well below strong matches.",
+  "profile": {
+    "user_id": "profile-nightlife-seeker",
+    "name": "Benny Rodriguez",
+    "email": "benny@sandlot.test",
+    "stated_interests": [
+      "rock",
+      "dance"
+    ],
+    "preferred_neighborhoods": [
+      "Downtown"
+    ],
+    "category_weights": {
+      "rock": 0.85,
+      "electronic": 0.6
+    },
+    "vibe_preferences": [
+      "late-night",
+      "high-energy"
+    ],
+    "excluded_categories": [],
+    "created_at": "2026-06-12T12:00:00+00:00",
+    "last_updated": "2026-06-12T12:00:00+00:00"
+  },
+  "event": {
+    "start_datetime": "2026-06-20T20:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/event",
+    "is_free": false,
+    "description": "Sandlot test event for ranking golden fixtures.",
+    "best_source_feed": "feed_a",
+    "low_information": false,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2026-06-12T12:00:00+00:00",
+    "performers": [],
+    "id": "rank-night-weak",
+    "title": "Morning Yoga in the Park",
+    "neighborhood": "Santa Monica",
+    "categories": [
+      "Wellness"
+    ],
+    "vibe_tags": [
+      "calm",
+      "outdoor"
+    ],
+    "source_count": 1,
+    "source_feeds": [
+      "feed_a"
+    ],
+    "top_performer_affinity": 0.0,
+    "source_quality_score": 0.4,
+    "description_quality_score": 0.5
+  },
+  "semantic_similarity": 0.0,
+  "previously_recommended_ids": [],
+  "expected_score_breakdown": {
+    "category_fit": 0.0,
+    "vibe_fit": 0.0,
+    "semantic_similarity": 0.0,
+    "performer_affinity": 0.0,
+    "location": 0.0,
+    "novelty": 1.0,
+    "source_quality": 0.4,
+    "source_coverage": 0.3333333333333333,
+    "description_quality": 0.5
+  },
+  "expected_score": 0.21166666666666667,
+  "expected_is_previously_recommended": false,
+  "expected_novelty_penalty_applied": false
+}

@@ -1,0 +1,77 @@
+{
+  "fixture_id": "family_explorer_wildcard_candidate",
+  "profile_key": "family_explorer",
+  "event_type": "wildcard_candidate",
+  "description": "Moderate fit with unseen categories or vibes for wildcard/novelty.",
+  "profile": {
+    "user_id": "profile-family-explorer",
+    "name": "Scotty Smalls",
+    "email": "smalls@sandlot.test",
+    "stated_interests": [
+      "family",
+      "outdoor"
+    ],
+    "preferred_neighborhoods": [
+      "Pasadena"
+    ],
+    "category_weights": {
+      "family": 0.95,
+      "outdoor": 0.8
+    },
+    "vibe_preferences": [
+      "family-friendly",
+      "outdoor"
+    ],
+    "excluded_categories": [],
+    "created_at": "2026-06-12T12:00:00+00:00",
+    "last_updated": "2026-06-12T12:00:00+00:00"
+  },
+  "event": {
+    "start_datetime": "2026-06-20T20:00:00+00:00",
+    "venue": "The Sandlot",
+    "city": "Los Angeles",
+    "url": "https://example.com/event",
+    "is_free": false,
+    "description": "Sandlot test event for ranking golden fixtures.",
+    "best_source_feed": "feed_a",
+    "low_information": false,
+    "run_id": "youre-killing-me-smalls",
+    "normalized_at": "2026-06-12T12:00:00+00:00",
+    "performers": [],
+    "id": "rank-family-wildcard",
+    "title": "Puppet Theater Workshop",
+    "neighborhood": "Altadena",
+    "categories": [
+      "Theater",
+      "Family"
+    ],
+    "vibe_tags": [
+      "creative",
+      "intimate"
+    ],
+    "source_count": 1,
+    "source_feeds": [
+      "feed_a"
+    ],
+    "top_performer_affinity": 0.68,
+    "source_quality_score": 0.76,
+    "description_quality_score": 0.88
+  },
+  "semantic_similarity": 0.0,
+  "previously_recommended_ids": [],
+  "expected_score_breakdown": {
+    "category_fit": 0.95,
+    "vibe_fit": 0.0,
+    "semantic_similarity": 0.0,
+    "performer_affinity": 0.68,
+    "location": 0.0,
+    "novelty": 1.0,
+    "source_quality": 0.76,
+    "source_coverage": 0.3333333333333333,
+    "description_quality": 0.88
+  },
+  "expected_score": 0.5446666666666667,
+  "expected_is_previously_recommended": false,
+  "expected_novelty_penalty_applied": false,
+  "expected_wildcard_eligible": true
+}
