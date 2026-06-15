@@ -7,6 +7,8 @@ round-trips against isolated SQLite files.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlalchemy import create_engine, inspect
 
 from alembic import command
