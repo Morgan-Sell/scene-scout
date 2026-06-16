@@ -137,19 +137,46 @@ def test_compute_location_fit_matches_preferred_neighborhood() -> None:
     assert ranking.compute_location_fit(event, profile) == pytest.approx(1.0)
 
 
-def test_compute_novelty_penalizes_previous_recommendations() -> None:
+def test_compute_novelty_recency_factor_is_one_for_never_recommended() -> None:
+    assert ranking.compute_novelty_recency_factor(None) == pytest.approx(1.0)
+    assert ranking.compute_novelty_recency_factor(40) == pytest.approx(1.0)
+
+
+def test_compute_novelty_recency_factor_penalizes_recent_more_than_old() -> None:
+    day_15 = ranking.compute_novelty_recency_factor(15)
+    day_21 = ranking.compute_novelty_recency_factor(21)
+    day_27 = ranking.compute_novelty_recency_factor(27)
+
+    assert day_15 < day_21 < day_27
+    assert day_27 == pytest.approx(1.0, abs=0.05)
+
+
+def test_compute_novelty_recency_factor_is_non_linear() -> None:
+    day_15 = ranking.compute_novelty_recency_factor(15)
+    day_21 = ranking.compute_novelty_recency_factor(21)
+    day_27 = ranking.compute_novelty_recency_factor(27)
+
+    assert (day_21 - day_15) > (day_27 - day_21)
+
+
+def test_compute_novelty_applies_exponential_recency() -> None:
     profile = _profile()
     event = _event(id="seen-before")
 
-    score, is_previous, penalty = ranking.compute_novelty(
+    score_recent, is_previous, penalty = ranking.compute_novelty(
         event,
         profile,
-        previously_recommended_ids={"seen-before"},
+        days_since_recommended=15,
+    )
+    score_old, _, _ = ranking.compute_novelty(
+        event,
+        profile,
+        days_since_recommended=27,
     )
 
     assert is_previous is True
     assert penalty is True
-    assert score < 1.0
+    assert score_recent < score_old < 1.0
 
 
 def test_composite_score_is_deterministic_weighted_sum() -> None:
@@ -249,7 +276,7 @@ def test_assign_wildcard_slots_marks_moderate_fit_high_novelty_events() -> None:
         _event(id="wildcard"),
         profile,
         semantic_similarity=0.0,
-        previously_recommended_ids=set(),
+        days_since_recommended=None,
     )[0]
     breakdown["novelty"] = max(breakdown["novelty"], WILDCARD_MIN_NOVELTY)
     score = (WILDCARD_SCORE_MIN + WILDCARD_SCORE_MAX) / 2
@@ -278,34 +305,47 @@ def test_assign_wildcard_slots_marks_moderate_fit_high_novelty_events() -> None:
     assert wildcard_flags["top"] is False
 
 
-def test_load_previously_recommended_event_ids_reads_history_index(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.asyncio
+async def test_run_applies_exponential_recency_from_history_db(
+    migrated_databases: tuple,
 ) -> None:
-    history_dir = tmp_path / "vol-history"
-    history_dir.mkdir()
-    now = datetime(2026, 6, 12, tzinfo=timezone.utc)
-    payload = {
-        "entries": [
-            {
-                "event_id": "recent",
-                "recommended_at": (now - timedelta(days=3)).isoformat(),
-            },
-            {
-                "event_id": "old",
-                "recommended_at": (now - timedelta(days=40)).isoformat(),
-            },
-        ]
-    }
-    (history_dir / "hard_exclude_index.json").write_text(
-        json.dumps(payload),
-        encoding="utf-8",
+    from scene_scout.models.history import RecommendationRecord
+    from scene_scout.services.feedback import generate_feedback_token
+    from scene_scout.services.history import write_recommendations
+
+    profile = _profile()
+    event = _event(id="repeat-show")
+    now = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
+
+    mock_complete = AsyncMock(
+        return_value=RankingExplanationLLMOutput(explanation="Solid pick."),
     )
-    monkeypatch.setattr(ranking, "vol_history_dir", lambda: history_dir)
+    with (
+        patch("scene_scout.agents.ranking.similarity_score", return_value=0.0),
+        patch("scene_scout.agents.ranking.complete", mock_complete),
+        patch("scene_scout.agents.ranking.get_liked_events_collection"),
+    ):
+        fresh = await ranking.run([event], profile, TEST_RUN_ID, now=now)
 
-    recent_ids = ranking.load_previously_recommended_event_ids(now=now)
+        write_recommendations(
+            [
+                RecommendationRecord(
+                    feedback_token=generate_feedback_token(),
+                    event_id="repeat-show",
+                    run_id=TEST_RUN_ID,
+                    rank=1,
+                    score=0.9,
+                    score_breakdown={"category_match": 0.9},
+                    event_title="Repeat Show",
+                    explanation="Sent last week.",
+                    recommended_at=now - timedelta(days=15),
+                )
+            ]
+        )
+        repeat = await ranking.run([event], profile, TEST_RUN_ID, now=now)
 
-    assert recent_ids == {"recent"}
+    assert repeat[0].novelty_penalty_applied is True
+    assert repeat[0].score < fresh[0].score
 
 
 def _assert_score_approx(actual: float, expected: float) -> None:
@@ -319,12 +359,13 @@ def test_golden_fixture_deterministic_scoring(fixture_name: str) -> None:
     profile = _profile_from_golden(golden)
     event = _event_from_golden(golden)
     previous_ids = set(golden["previously_recommended_ids"])
+    days_since = None if not previous_ids else 15.0
 
     breakdown, is_previous, penalty = ranking.compute_score_breakdown(
         event,
         profile,
         semantic_similarity=golden["semantic_similarity"],
-        previously_recommended_ids=previous_ids,
+        days_since_recommended=days_since,
     )
     score = ranking.composite_score(breakdown)
 
@@ -358,19 +399,19 @@ def test_golden_source_coverage_isolates_feed_count(profile_key: str) -> None:
         one_feed,
         profile,
         semantic_similarity=0.0,
-        previously_recommended_ids=set(),
+        days_since_recommended=None,
     )
     two_breakdown, _, _ = ranking.compute_score_breakdown(
         two_feeds,
         profile,
         semantic_similarity=0.0,
-        previously_recommended_ids=set(),
+        days_since_recommended=None,
     )
     three_breakdown, _, _ = ranking.compute_score_breakdown(
         three_feeds,
         profile,
         semantic_similarity=0.0,
-        previously_recommended_ids=set(),
+        days_since_recommended=None,
     )
 
     assert one_breakdown["source_coverage"] == pytest.approx(1 / SOURCE_COVERAGE_MAX)
@@ -395,13 +436,13 @@ def test_score_component_isolation_category_fit() -> None:
         matched,
         profile,
         semantic_similarity=0.0,
-        previously_recommended_ids=set(),
+        days_since_recommended=None,
     )
     mismatched_breakdown, _, _ = ranking.compute_score_breakdown(
         mismatched,
         profile,
         semantic_similarity=0.0,
-        previously_recommended_ids=set(),
+        days_since_recommended=None,
     )
 
     assert matched_breakdown["category_fit"] > mismatched_breakdown["category_fit"]
@@ -439,13 +480,13 @@ def test_golden_wildcard_slot_assignment(profile_key: str) -> None:
         wildcard_event,
         profile,
         semantic_similarity=0.0,
-        previously_recommended_ids=set(),
+        days_since_recommended=None,
     )
     top_breakdown, _, _ = ranking.compute_score_breakdown(
         top_event,
         profile,
         semantic_similarity=0.0,
-        previously_recommended_ids=set(),
+        days_since_recommended=None,
     )
 
     ranked = [
@@ -492,7 +533,7 @@ async def test_golden_fixture_explanation_fallback(fixture_name: str) -> None:
             [event],
             profile,
             TEST_RUN_ID,
-            previously_recommended_ids=set(golden["previously_recommended_ids"]),
+            recency_lookup={},
         )
 
     assert len(results) == 1

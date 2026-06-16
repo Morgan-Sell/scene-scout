@@ -15,7 +15,7 @@ import asyncio
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,7 @@ from scene_scout.agents import (
 )
 from scene_scout.agents.description_quality import has_named_performer
 from scene_scout.agents.event_normalization import is_within_normalization_window
-from scene_scout.config import vol_history_dir, vol_pipeline_state_dir
+from scene_scout.config import vol_pipeline_state_dir
 from scene_scout.db import run_migrations
 from scene_scout.logging import get_logger
 from scene_scout.models.enrichment import EnrichedEvent
@@ -41,6 +41,7 @@ from scene_scout.pre_enrichment_filter_config import (
     PRE_ENRICHMENT_COMING_WEEK_DAYS,
     PRE_ENRICHMENT_HARD_EXCLUDE_DAYS,
 )
+from scene_scout.services import history as history_service
 from scene_scout.services.batch import BatchRequest, BatchResults, get_batch_strategy
 from scene_scout.services.cache import CacheService
 from scene_scout.services.geocoding import venue_cache_key
@@ -361,32 +362,13 @@ def _load_hard_exclude_event_ids(
     now: datetime,
     exclude_days: int = PRE_ENRICHMENT_HARD_EXCLUDE_DAYS,
 ) -> set[str]:
-    """Return event IDs recommended within the hard-exclude window.
-
-    Reads ``vol-history/hard_exclude_index.json`` when present. Phase 7.2 replaces
-    this lightweight index with the full recommendation history service.
-    """
-    index_path = vol_history_dir() / "hard_exclude_index.json"
-    if not index_path.is_file():
-        return set()
-
-    payload = json.loads(index_path.read_text(encoding="utf-8"))
-    entries = payload.get("entries", [])
-    cutoff = now - timedelta(days=exclude_days)
-    excluded: set[str] = set()
-
-    for entry in entries:
-        event_id = entry.get("event_id")
-        recommended_at_raw = entry.get("recommended_at")
-        if not event_id or not recommended_at_raw:
-            continue
-        recommended_at = datetime.fromisoformat(
-            str(recommended_at_raw).replace("Z", "+00:00")
+    """Return event IDs recommended within the hard-exclude window."""
+    if exclude_days != PRE_ENRICHMENT_HARD_EXCLUDE_DAYS:
+        return history_service.get_recommended_event_ids(
+            exclude_days,
+            now=now,
         )
-        if recommended_at.astimezone(timezone.utc) >= cutoff.astimezone(timezone.utc):
-            excluded.add(str(event_id))
-
-    return excluded
+    return history_service.get_hard_exclude_event_ids(now=now)
 
 
 def _pre_enrichment_discard_reason(

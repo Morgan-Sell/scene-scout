@@ -9,9 +9,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
-import pytest
 
 from scene_scout.models.event import NormalizedEvent, compute_normalized_event_id
 from scene_scout.orchestrator import (
@@ -138,25 +135,39 @@ def test_apply_pre_enrichment_filter_low_information_takes_priority_over_exclude
     assert result.discards[DISCARD_EXCLUDE_WINDOW] == 0
 
 
-def test_load_hard_exclude_event_ids_reads_history_index(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_load_hard_exclude_event_ids_from_history_db(
+    migrated_databases: tuple,
 ) -> None:
-    history_dir = tmp_path / "vol-history"
-    history_dir.mkdir()
-    recent = (REFERENCE_NOW - timedelta(days=3)).isoformat()
-    stale = (REFERENCE_NOW - timedelta(days=20)).isoformat()
-    index = {
-        "entries": [
-            {"event_id": "recent-event", "recommended_at": recent},
-            {"event_id": "stale-event", "recommended_at": stale},
+    from scene_scout.models.history import RecommendationRecord
+    from scene_scout.services.feedback import generate_feedback_token
+    from scene_scout.services.history import write_recommendations
+
+    write_recommendations(
+        [
+            RecommendationRecord(
+                feedback_token=generate_feedback_token(),
+                event_id="recent-event",
+                run_id=TEST_RUN_ID,
+                rank=1,
+                score=0.9,
+                score_breakdown={"category_match": 0.9},
+                event_title="Recent Sandlot Classic",
+                explanation="Sent a few days ago.",
+                recommended_at=REFERENCE_NOW - timedelta(days=3),
+            ),
+            RecommendationRecord(
+                feedback_token=generate_feedback_token(),
+                event_id="stale-event",
+                run_id=TEST_RUN_ID,
+                rank=1,
+                score=0.9,
+                score_breakdown={"category_match": 0.9},
+                event_title="Stale Sandlot Classic",
+                explanation="Sent three weeks ago.",
+                recommended_at=REFERENCE_NOW - timedelta(days=20),
+            ),
         ]
-    }
-    (history_dir / "hard_exclude_index.json").write_text(
-        json.dumps(index),
-        encoding="utf-8",
     )
-    monkeypatch.setenv("VOL_HISTORY_DIR", str(history_dir))
 
     result = apply_pre_enrichment_filter(
         [
