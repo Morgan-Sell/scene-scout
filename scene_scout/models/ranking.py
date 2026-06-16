@@ -7,9 +7,13 @@ Recommendation Curator.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from scene_scout.models.enrichment import EnrichedEvent
+
+SelloutRisk = Literal["low", "medium", "high"]
 
 SCORE_COMPONENT_KEYS = (
     "category_fit",
@@ -42,7 +46,15 @@ class RankedEvent(BaseModel):
     is_previously_recommended: bool = False
     novelty_penalty_applied: bool = False
     wildcard_slot: bool = False
+    sellout_risk: SelloutRisk | None = None
     run_id: str
+
+    @field_validator("sellout_risk")
+    @classmethod
+    def _validate_sellout_risk(cls, value: SelloutRisk | None) -> SelloutRisk | None:
+        if value is not None and value not in {"low", "medium", "high"}:
+            raise ValueError("sellout_risk must be low, medium, or high")
+        return value
 
     @field_validator("score")
     @classmethod
