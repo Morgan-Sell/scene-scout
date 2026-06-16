@@ -14,15 +14,12 @@ Outputs : list[RankedEvent] sorted by score descending
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta, timezone
+import math
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from scene_scout.config import (
-    RANKING_COMPONENT_WEIGHTS,
-    SOURCE_COVERAGE_MAX,
-    vol_history_dir,
-)
+from scene_scout.config import RANKING_COMPONENT_WEIGHTS, SOURCE_COVERAGE_MAX
+from scene_scout.history_config import HARD_RECENCY_DAYS, SOFT_RECENCY_DAYS
 from scene_scout.logging import get_logger
 from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.ranking import (
@@ -36,14 +33,15 @@ from scene_scout.ranking_config import (
     NEUTRAL_CATEGORY_FIT,
     NEUTRAL_LOCATION_FIT,
     NEUTRAL_VIBE_FIT,
-    NOVELTY_PENALIZED_SCORE,
+    NOVELTY_RECENCY_DECAY_LAMBDA,
+    NOVELTY_RECENCY_FLOOR,
     NOVELTY_UNSEEN_BONUS,
-    RANKING_SOFT_RECENCY_DAYS,
     WILDCARD_MIN_NOVELTY,
     WILDCARD_SCORE_MAX,
     WILDCARD_SCORE_MIN,
     WILDCARD_SLOT_COUNT,
 )
+from scene_scout.services import history as history_service
 from scene_scout.services.chroma import get_liked_events_collection, similarity_score
 from scene_scout.services.llm import LLMValidationError, complete
 from scene_scout.services.prompt_loader import render_prompt
@@ -143,16 +141,43 @@ def compute_location_fit(event: EnrichedEvent, profile: UserProfile) -> float:
     return 0.0
 
 
+def compute_novelty_recency_factor(days_since: float | None) -> float:
+    """Return exponential novelty recency factor in ``[floor, 1.0]``.
+
+    Parameters
+    ----------
+    days_since : float, optional
+        Days since the event was last recommended. ``None`` means never recommended.
+    """
+    if days_since is None or days_since >= SOFT_RECENCY_DAYS:
+        return 1.0
+    if days_since <= HARD_RECENCY_DAYS:
+        return NOVELTY_RECENCY_FLOOR
+
+    t_soft = days_since - HARD_RECENCY_DAYS
+    recovery = 1.0 - math.exp(-NOVELTY_RECENCY_DECAY_LAMBDA * t_soft)
+    return NOVELTY_RECENCY_FLOOR + (1.0 - NOVELTY_RECENCY_FLOOR) * recovery
+
+
+def _days_since_recommended(
+    recommended_at: datetime,
+    *,
+    now: datetime,
+) -> float:
+    delta = now.astimezone(timezone.utc) - recommended_at.astimezone(timezone.utc)
+    return delta.total_seconds() / 86_400
+
+
 def compute_novelty(
     event: EnrichedEvent,
     profile: UserProfile,
     *,
-    previously_recommended_ids: set[str],
+    days_since_recommended: float | None = None,
 ) -> tuple[float, bool, bool]:
     """Return novelty score, prior recommendation flag, and penalty flag."""
-    is_previously_recommended = event.id in previously_recommended_ids
-    penalty_applied = is_previously_recommended
-    score = NOVELTY_PENALIZED_SCORE if is_previously_recommended else 1.0
+    score = compute_novelty_recency_factor(days_since_recommended)
+    penalty_applied = score < 1.0
+    is_previously_recommended = penalty_applied
 
     known_categories = {_normalize_label(key) for key in profile.category_weights}
     known_vibes = set(profile.vibe_preferences)
@@ -172,13 +197,13 @@ def compute_score_breakdown(
     profile: UserProfile,
     *,
     semantic_similarity: float,
-    previously_recommended_ids: set[str],
+    days_since_recommended: float | None = None,
 ) -> tuple[dict[str, float], bool, bool]:
     """Compute all nine ranking components for an event."""
     novelty, is_previously_recommended, penalty_applied = compute_novelty(
         event,
         profile,
-        previously_recommended_ids=previously_recommended_ids,
+        days_since_recommended=days_since_recommended,
     )
     breakdown = {
         "category_fit": compute_category_fit(event, profile),
@@ -201,36 +226,6 @@ def composite_score(breakdown: dict[str, float]) -> float:
         for component in SCORE_COMPONENT_KEYS
     )
     return _clamp_unit_score(total)
-
-
-def load_previously_recommended_event_ids(
-    *,
-    now: datetime | None = None,
-    recency_days: int = RANKING_SOFT_RECENCY_DAYS,
-) -> set[str]:
-    """Return event IDs recommended within the soft-recency window."""
-    index_path = vol_history_dir() / "hard_exclude_index.json"
-    if not index_path.is_file():
-        return set()
-
-    payload = json.loads(index_path.read_text(encoding="utf-8"))
-    entries = payload.get("entries", [])
-    current = now or datetime.now(timezone.utc)
-    cutoff = current - timedelta(days=recency_days)
-    recommended: set[str] = set()
-
-    for entry in entries:
-        event_id = entry.get("event_id")
-        recommended_at_raw = entry.get("recommended_at")
-        if not event_id or not recommended_at_raw:
-            continue
-        recommended_at = datetime.fromisoformat(
-            str(recommended_at_raw).replace("Z", "+00:00")
-        )
-        if recommended_at.astimezone(timezone.utc) >= cutoff.astimezone(timezone.utc):
-            recommended.add(str(event_id))
-
-    return recommended
 
 
 def assign_wildcard_slots(ranked_events: list[RankedEvent]) -> list[RankedEvent]:
@@ -301,7 +296,8 @@ async def run(
     run_id: str,
     *,
     chroma_collection: Collection | None = None,
-    previously_recommended_ids: set[str] | None = None,
+    recency_lookup: dict[str, datetime] | None = None,
+    now: datetime | None = None,
 ) -> list[RankedEvent]:
     """Rank enriched events and attach grounded explanations.
 
@@ -316,8 +312,11 @@ async def run(
     chroma_collection : Collection, optional
         Liked-events collection for semantic similarity. Defaults to the
         persistent ``vol-chroma`` collection.
-    previously_recommended_ids : set[str], optional
-        Event IDs within the soft-recency window. Loaded from history when omitted.
+    recency_lookup : dict[str, datetime], optional
+        Map of event ID to last ``recommended_at``. Loaded from SQLite history
+        when omitted.
+    now : datetime, optional
+        Reference time for recency decay. Defaults to current UTC time.
 
     Returns
     -------
@@ -331,10 +330,11 @@ async def run(
     """
     logger = get_logger("ranking", run_id=run_id)
     collection = chroma_collection or get_liked_events_collection()
-    recent_ids = (
-        previously_recommended_ids
-        if previously_recommended_ids is not None
-        else load_previously_recommended_event_ids()
+    reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    lookup = (
+        recency_lookup
+        if recency_lookup is not None
+        else history_service.build_recency_lookup(now=reference)
     )
 
     eligible_events = [
@@ -349,11 +349,17 @@ async def run(
 
     ranked: list[RankedEvent] = []
     for event in eligible_events:
+        recommended_at = lookup.get(event.id)
+        days_since = (
+            _days_since_recommended(recommended_at, now=reference)
+            if recommended_at is not None
+            else None
+        )
         breakdown, is_previously_recommended, penalty_applied = compute_score_breakdown(
             event,
             profile,
             semantic_similarity=similarity_score(event, collection),
-            previously_recommended_ids=recent_ids,
+            days_since_recommended=days_since,
         )
         total_score = composite_score(breakdown)
         logger.info(

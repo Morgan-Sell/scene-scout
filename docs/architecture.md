@@ -644,7 +644,8 @@ Quality check: any tag exceeding 40% of events in a run → classifier collapse.
 - `semantic_similarity` — cosine similarity to Chroma liked-events (0.0 cold start)
 - `performer_affinity` — `top_performer_affinity` from Talent Scout
 - `location` — proximity to user's preferred neighborhoods
-- `novelty` — penalty for previously recommended; bonus for unseen categories/vibes
+- `novelty` — exponential recency decay (14–28 days since last recommendation) plus
+  exploration bonus for unseen categories/vibes; hard exclude within 14 days
 - `source_quality` — from feed config (`best_source_feed.source_quality_score`)
 - `source_coverage` — normalized `source_count`; weak positive for multi-feed events
 - `description_quality` — confidence discount for `low_information` records
@@ -1036,7 +1037,8 @@ class CuratedRecommendation(BaseModel):
 ```
 
 **Diversity rules (v1):** Max 3 events per category · Max 2 per venue · ≥2 different
-dates · 1–2 wildcard slots · Last 4 weeks: score × 0.5 · Last 2 weeks: hard exclude
+dates · 1–2 wildcard slots · Soft recency (14–28 days): exponential novelty decay ·
+Last 2 weeks: hard exclude
 
 ---
 

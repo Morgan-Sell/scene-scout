@@ -12,9 +12,26 @@ from sqlalchemy import create_engine, select
 
 from scene_scout.db.models import recommendation_history
 from scene_scout.db.urls import database_history_url
+from scene_scout.history_config import (
+    HARD_RECENCY_DAYS,
+    SOFT_RECENCY_DAYS,
+    SOFT_RECENCY_SCORE_MULTIPLIER,
+)
 from scene_scout.models.history import RecommendationRecord
 from scene_scout.services.feedback import generate_feedback_token
-from scene_scout.services.history import get_recent, write_recommendations
+from scene_scout.services.history import (
+    HistoryEntryNotFoundError,
+    apply_recency_penalty,
+    apply_soft_recency_penalty,
+    build_recency_lookup,
+    classify_recency_penalty,
+    get_hard_exclude_event_ids,
+    get_last_recommended_at,
+    get_recent,
+    get_soft_recency_event_ids,
+    update_feedback,
+    write_recommendations,
+)
 from tests.conftest import TEST_RUN_ID
 
 NOW = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
@@ -112,3 +129,153 @@ def test_get_recent_orders_newest_first(migrated_databases: tuple) -> None:
 
     assert [entry.event_id for entry in entries] == ["newer-pick", "older-pick"]
     assert entries[0].recommended_at > entries[1].recommended_at
+
+
+def test_get_soft_and_hard_recency_event_ids(migrated_databases: tuple) -> None:
+    hard_cutoff_event = _record(
+        event_id="hard-window",
+        recommended_at=NOW - timedelta(days=HARD_RECENCY_DAYS - 1),
+    )
+    soft_only_event = _record(
+        event_id="soft-window",
+        recommended_at=NOW - timedelta(days=HARD_RECENCY_DAYS + 3),
+    )
+    outside_event = _record(
+        event_id="outside-window",
+        recommended_at=NOW - timedelta(days=SOFT_RECENCY_DAYS + 5),
+    )
+    write_recommendations([hard_cutoff_event, soft_only_event, outside_event])
+
+    soft_ids = get_soft_recency_event_ids(now=NOW)
+    hard_ids = get_hard_exclude_event_ids(now=NOW)
+
+    assert soft_ids == {"hard-window", "soft-window"}
+    assert hard_ids == {"hard-window"}
+
+
+def test_classify_recency_penalty_prefers_hard_over_soft(
+    migrated_databases: tuple,
+) -> None:
+    write_recommendations(
+        [
+            _record(
+                event_id="recent-repeat",
+                recommended_at=NOW - timedelta(days=5),
+            )
+        ]
+    )
+
+    assert classify_recency_penalty("recent-repeat", now=NOW) == "hard"
+    assert classify_recency_penalty("never-sent", now=NOW) == "none"
+
+
+def test_classify_recency_penalty_soft_only_outside_hard_window(
+    migrated_databases: tuple,
+) -> None:
+    write_recommendations(
+        [
+            _record(
+                event_id="three-weeks-ago",
+                recommended_at=NOW - timedelta(days=20),
+            )
+        ]
+    )
+
+    assert classify_recency_penalty("three-weeks-ago", now=NOW) == "soft"
+
+
+def test_apply_recency_penalty_multiplies_score_for_soft_band(
+    migrated_databases: tuple,
+) -> None:
+    write_recommendations(
+        [
+            _record(
+                event_id="soft-penalty",
+                recommended_at=NOW - timedelta(days=20),
+            )
+        ]
+    )
+
+    adjusted, band = apply_recency_penalty(0.8, "soft-penalty", now=NOW)
+
+    assert band == "soft"
+    assert adjusted == pytest.approx(0.8 * SOFT_RECENCY_SCORE_MULTIPLIER)
+
+
+def test_apply_recency_penalty_leaves_score_for_hard_band(
+    migrated_databases: tuple,
+) -> None:
+    write_recommendations(
+        [
+            _record(
+                event_id="hard-exclude",
+                recommended_at=NOW - timedelta(days=3),
+            )
+        ]
+    )
+
+    adjusted, band = apply_recency_penalty(0.8, "hard-exclude", now=NOW)
+
+    assert band == "hard"
+    assert adjusted == pytest.approx(0.8)
+
+
+def test_apply_soft_recency_penalty_multiplies_valid_scores() -> None:
+    assert apply_soft_recency_penalty(0.8) == pytest.approx(
+        0.8 * SOFT_RECENCY_SCORE_MULTIPLIER
+    )
+    assert apply_soft_recency_penalty(1.0) == pytest.approx(
+        SOFT_RECENCY_SCORE_MULTIPLIER
+    )
+
+
+def test_build_recency_lookup_returns_latest_recommended_at(
+    migrated_databases: tuple,
+) -> None:
+    older = _record(
+        event_id="repeat-show",
+        recommended_at=NOW - timedelta(days=20),
+    )
+    newer = _record(
+        event_id="repeat-show",
+        recommended_at=NOW - timedelta(days=10),
+    )
+    outside = _record(
+        event_id="ancient-show",
+        recommended_at=NOW - timedelta(days=SOFT_RECENCY_DAYS + 1),
+    )
+    write_recommendations([older, newer, outside])
+
+    lookup = build_recency_lookup(now=NOW)
+
+    assert lookup == {"repeat-show": newer.recommended_at}
+    assert "ancient-show" not in lookup
+
+
+def test_get_last_recommended_at_returns_none_for_unknown_event(
+    migrated_databases: tuple,
+) -> None:
+    write_recommendations(
+        [_record(event_id="known-show", recommended_at=NOW - timedelta(days=5))]
+    )
+
+    assert get_last_recommended_at("known-show", now=NOW) == NOW - timedelta(days=5)
+    assert get_last_recommended_at("unknown-show", now=NOW) is None
+
+
+def test_update_feedback_populates_feedback_signal(migrated_databases: tuple) -> None:
+    token = generate_feedback_token()
+    write_recommendations([_record(feedback_token=token, event_id="feedback-target")])
+
+    updated = update_feedback(token, "click")
+
+    assert updated.feedback_signal == "click"
+    assert updated.event_id == "feedback-target"
+
+    entries = get_recent(days=30, now=NOW)
+    assert entries[0].feedback_signal == "click"
+
+
+def test_update_feedback_raises_for_unknown_token(migrated_databases: tuple) -> None:
+    with pytest.raises(HistoryEntryNotFoundError):
+        update_feedback(generate_feedback_token(), "negative")
