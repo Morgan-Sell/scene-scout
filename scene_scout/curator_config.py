@@ -11,7 +11,16 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from scene_scout.ranking_config import WILDCARD_SLOT_COUNT
+
 _CURATOR_VOICE_PATH = Path(__file__).parent / "prompts" / "curator_voice.txt"
+
+CURATOR_MAX_RECOMMENDATIONS = 10
+CURATOR_MAX_PER_CATEGORY = 3
+CURATOR_MAX_PER_VENUE = 2
+CURATOR_MIN_DISTINCT_DATES = 2
+CURATOR_MIN_WILDCARD_SLOTS = 1
+CURATOR_MAX_WILDCARD_SLOTS = WILDCARD_SLOT_COUNT
 
 
 class CuratorConfig(BaseModel):
