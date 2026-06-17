@@ -428,7 +428,8 @@ explanation fallback. Golden fixtures for 3 user profiles × 5 event types.
 ---
 
 ## Phase 7 — Curation, Email, and Full UAT
-*Goal: Final top 10 selected, email composed, real email sent in UAT. End-to-end verified.*
+*Goal: Final top 10 selected, email composed, pipeline wired end-to-end. Real email
+delivery verified after Resend operator setup (7.6).*
 
 ### 7.1 — Sell-Out Risk Agent
 **Files:** `scene_scout/agents/sellout_risk.py`
@@ -465,15 +466,46 @@ raises `LLMInfrastructureError`.
 email, and cold-start prompt. Submits to User Preference Agent. Profile viewer tab
 displays current `UserProfile` fields. Password loaded from `GRADIO_PASSWORD` env var.
 
-### 7.6 — Full End-to-End UAT
+### 7.6 — Resend & Email Delivery Setup (operator)
+**Files:** `.env.example`, `README.md` (extend env table)
+**Done when:** Operator has completed external Resend setup and local env is ready
+for live sends. **Not required for `--dry-run` development** — defer until you can
+complete account verification (e.g. email/phone confirmation).
+
+**Operator checklist:**
+1. Create a [Resend](https://resend.com) account (free tier sufficient for dev/UAT).
+2. Verify a sending domain (add DNS records per Resend dashboard) **or** use Resend
+   sandbox constraints for initial testing (often limited to the account owner inbox).
+3. Create an API key → set `RESEND_API_KEY` in `.env`.
+4. Choose a verified from-address → set `RESEND_FROM_EMAIL` (or `FROM_EMAIL`) in `.env`.
+5. Set recipient inbox → `USER_EMAIL` in `.env` (v1 delivery target; Modal Secret
+   `user` in production — see Phase 11).
+6. Optional: set `TRACKING_BASE_URL` once Phase 8 tracking endpoints are deployed.
+
+**Note:** Onboarding stores email on `UserProfile.email`; the Email Composer currently
+sends to `USER_EMAIL` env (single-user v1). Aligning send with profile email is a
+follow-up if multi-user delivery is needed.
+
+### 7.7 — Full End-to-End UAT
 **Files:** `scene_scout/cli.py` (complete), `scene_scout/orchestrator.py` (complete)
 **Done when:** `uv run python -m scene_scout.cli uat --prompt "..."` runs the full
-pipeline, produces a real email at `USER_EMAIL` with subject `[UAT {run_id}]`, writes
-`output/uat_{run_id}/email_preview.html`, and prints the pipeline summary table
-including: feeds fetched, feeds UNCHANGED (304), `seen_entries` hit rate, entries
-extracted, events after each filter stage, enrichment cache hit rates, top 10 titles
-and scores with `source_count` visible in score breakdown. Email opens correctly
-in an inbox. Tracking links are valid. Allegra's voice is present.
+pipeline (real Feed Scout wired, no agent stubs), writes
+`output/uat_{run_id}/email_preview.html` and `summary.json`, and prints the pipeline
+summary table including: feeds fetched, feeds UNCHANGED (304), `seen_entries` hit rate,
+entries extracted, events after each filter stage, enrichment cache hit rates, top 10
+titles and scores with `source_count` visible in score breakdown. Allegra's voice is
+present in the preview HTML.
+
+**Dry-run gate (does not require 7.6):**
+- `uv run python -m scene_scout.cli uat --prompt "..." --dry-run` completes without
+  error; preview HTML and summary are written; Resend is not called.
+
+**Live email gate (requires 7.6):**
+- Same command **without** `--dry-run` and `DRY_RUN=false` produces a real email at
+  `USER_EMAIL` with subject prefixed `[UAT {run_id}]`. Email opens correctly in an
+  inbox. Tracking links are valid once Phase 8 endpoints are deployed.
+
+Architecture rule: **if the email did not arrive, the live UAT did not pass.**
 
 ---
 
@@ -608,6 +640,7 @@ invoke). Does not send email or call LLM providers.
 | LLM service (`services/llm.py`) | ✓ Confirmed | 2 |
 | Prompt templating (Jinja2) | ✓ Confirmed | 2 |
 | Email source of truth (Modal Secret `USER_EMAIL`) | ✓ Confirmed | 7 |
+| Resend operator setup (account, domain, API key) | Deferred — see 7.6 | 7.6 |
 | Log retention (90 days) | ✓ Confirmed | 10 |
 | Test strategy (mock unit / golden regression) | ✓ Confirmed | 3 |
 | Gradio auth (built-in) | ✓ Confirmed | 7 |
@@ -680,8 +713,8 @@ modules import from there rather than duplicating setup.
 | Activity | When | Requires live API keys? | Sends email? |
 |---|---|---|---|
 | **`pytest` (CI)** | Every PR / push via GitHub Actions (Phase 2.10) | No — mocked LLM + HTTP | No |
-| **UAT `--dry-run`** | Local dev, Gradio Dev Section | Optional (pipeline may skip LLM until wired) | No — writes `email_preview.html` (Phase 7) |
-| **Full UAT** | Manual, pre-release | Yes — LLM, Resend, feeds | Yes — real email to `USER_EMAIL` |
+| **UAT `--dry-run`** | Local dev, Gradio Dev Section | Optional (pipeline may skip LLM until wired) | No — writes `email_preview.html` (Phase 7.7) |
+| **Full UAT (live email)** | Manual, pre-release; requires 7.6 | Yes — LLM, Resend, feeds | Yes — real email to `USER_EMAIL` |
 | **Modal CD** | Merge/tag deploy (Phase 11) | Yes — in Modal Secrets, not in repo | Only on scheduled prod run, not on every deploy |
 
 **Why decouple email from dry-run:** Most pipeline logic (feeds → rank → compose HTML)

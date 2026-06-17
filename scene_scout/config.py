@@ -92,6 +92,15 @@ def is_dry_run() -> bool:
     return os.getenv("DRY_RUN", "false").lower() == "true"
 
 
+# Email delivery — Resend + Modal Secret recipient.
+USER_EMAIL: str | None = os.getenv("USER_EMAIL")
+RESEND_API_KEY: str | None = os.getenv("RESEND_API_KEY")
+RESEND_FROM_EMAIL: str | None = os.getenv("RESEND_FROM_EMAIL") or os.getenv(
+    "FROM_EMAIL"
+)
+TRACKING_BASE_URL: str = os.getenv("TRACKING_BASE_URL", "http://localhost:7860")
+
+
 # LiteLLM configuration — provider-swappable via LLM_MODEL only.
 LLM_MODEL: str = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
 LLM_API_KEY: str | None = os.getenv("LLM_API_KEY")
