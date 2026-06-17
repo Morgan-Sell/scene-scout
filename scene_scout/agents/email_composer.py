@@ -87,8 +87,7 @@ def _profile_summary(profile: UserProfile) -> str:
         parts.append(f"Vibe preferences: {', '.join(profile.vibe_preferences)}")
     if profile.preferred_neighborhoods:
         parts.append(
-            "Preferred neighborhoods: "
-            + ", ".join(profile.preferred_neighborhoods)
+            "Preferred neighborhoods: " + ", ".join(profile.preferred_neighborhoods)
         )
     if profile.stated_dislikes:
         parts.append(f"Dislikes: {', '.join(profile.stated_dislikes)}")
@@ -212,14 +211,10 @@ def render_html_email(
         if price:
             sections.append(f"<p>{html.escape(price)}</p>")
         sections.append(f"<p>{html.escape(description)}</p>")
-        sections.append(
-            f"<p><em>{html.escape(recommendation.explanation)}</em></p>"
-        )
+        sections.append(f"<p><em>{html.escape(recommendation.explanation)}</em></p>")
         if recommendation.neighborhood_context:
             sections.append(
-                "<p>"
-                f"{html.escape(recommendation.neighborhood_context)}"
-                "</p>"
+                f"<p>{html.escape(recommendation.neighborhood_context)}</p>"
             )
         if recommendation.sellout_urgency_note:
             sections.append(
