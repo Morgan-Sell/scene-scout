@@ -460,11 +460,127 @@ deterministically. Resend API called with `USER_EMAIL` from Modal Secret. UAT su
 prefixed `[UAT {run_id}]`. `--dry-run` writes preview file, skips send. Resend failure
 raises `LLMInfrastructureError`.
 
-### 7.5 — Gradio UI: Onboarding and Profile
-**Files:** `scene_scout/gradio_app.py`
-**Done when:** Gradio app with built-in auth renders. Onboarding tab accepts name,
-email, and cold-start prompt. Submits to User Preference Agent. Profile viewer tab
-displays current `UserProfile` fields. Password loaded from `GRADIO_PASSWORD` env var.
+### 7.5 — Custom Web UI: Onboarding and Profile
+**Files:**
+`scene_scout/web/__init__.py`,
+`scene_scout/web/app.py`,
+`scene_scout/web/static/index.html`,
+`scene_scout/web/static/style.css`,
+`scene_scout/web/static/app.js`,
+`docker/web/Dockerfile` (update),
+`pyproject.toml` (update `web` extra)
+
+**Replaces:** `scene_scout/gradio_app.py` (delete)
+
+**Context:** Gradio's theming system cannot produce the desired visual design.
+This subphase replaces it with a lightweight FastAPI backend + fully custom
+HTML/CSS/JS frontend. The Python business logic from `gradio_app.py`
+(validation, profile loading, User Preference Agent call) moves into FastAPI
+route handlers. The frontend is a single-page HTML application with no
+JavaScript framework.
+
+**Backend — `scene_scout/web/app.py`:**
+- FastAPI application with the following routes:
+  - `POST /api/onboarding` — accepts `{name, email, prompt}` JSON body;
+    calls `user_preference.parse_cold_start()`; returns saved `UserProfile`
+    as JSON or a `{error}` response on validation failure
+  - `GET /api/profile` — loads and returns current `UserProfile` as JSON;
+    returns `404` with `{error}` if no profile exists
+  - `GET /health` — returns `{"status": "ok"}` for container health checks
+- Input validation mirrors `_validate_onboarding_inputs()` from `gradio_app.py`
+- `LLMInfrastructureError` → HTTP 502; `LLMValidationError` → HTTP 422
+- Static files served from `scene_scout/web/static/` via `StaticFiles` mount
+- Auth: HTTP Basic via `GRADIO_PASSWORD` env var (reuse existing secret name);
+  if unset, auth is disabled (local dev default)
+- `uvicorn` used as the ASGI server
+- `main()` entry point reads `WEB_SERVER_PORT` (default `7860`)
+
+**Frontend — `scene_scout/web/static/`:**
+
+The design language is **noir supper club** — a well-lit corner booth at a
+1950s jazz club. Warm, intimate, exclusive. Not dark or austere.
+
+*Typography:*
+- Headings: Cormorant Garant (serif) — loaded from Google Fonts
+- Body / UI: DM Sans at weight 300 — loaded from Google Fonts
+- Brand name: Cormorant Garant 500, forest green `#2A7A4B`
+- Tagline: Cormorant Garant italic, cognac amber `#B07D3A`
+
+*Color palette:*
+- Background: warm cream `#FAF7F2`
+- Primary text: deep warm charcoal `#2C2820`
+- Forest green `#2A7A4B` — brand name, active tab indicator, input focus
+  state, button border and hover fill
+- Cognac amber `#B07D3A` — field labels, Allegra's name in footer,
+  tagline text
+- Muted warm gray `#A09080` — inactive tabs, footer body text
+- Border / divider: `#D4C9B8`
+- Input underline at rest: `#C8BAA8`
+
+*Background pattern:*
+A subtle SVG repeating pattern suggesting a 1950s jazz supper club atmosphere
+— think low-opacity geometric motifs (diamond grid, thin crossed lines, or
+scallop arcs) in `#D4C9B8` at roughly 5% opacity. The pattern must not
+compete with the content; it should only be perceptible on close inspection.
+Embed the SVG pattern as a CSS `background-image` data URI on `body`.
+
+*Layout and components:*
+- Two tabs: **Onboarding** and **Profile**; tab switching handled in
+  vanilla JS without page reload
+- Active tab: forest green underline `2px solid #2A7A4B`, green label text
+- Form fields: label above in small-caps cognac amber; input as a single
+  ruled underline (no box border) — `border-bottom: 1px solid #C8BAA8`;
+  focus state shifts underline to forest green
+- Name and email fields side-by-side in a two-column grid
+- "Your taste" textarea: same ruled underline style, 4 rows
+- CTA button: **"Let Allegra in →"** — outlined style at rest
+  (`border: 1.5px solid #2A7A4B`, cream background, green text); fills to
+  deep forest green `#1F5C38` on hover; 2px border-radius; letter-spacing
+  0.12em; text uppercase; smooth `0.2s` transition
+- Footer line (below button, above page bottom): thin top border `#D4C9B8`;
+  italic Cormorant Garant; "**Allegra** — your personal arts & culture
+  concierge, here to find the nights worth keeping." with "Allegra" in
+  cognac amber
+- Subtitle copy below tabs: *"Your name, email, and what you love.
+  That's all Allegra needs."* in italic Cormorant Garant, muted warm gray
+- Generous vertical rhythm throughout; no cramped spacing
+- Placeholder text: italic, `#BEB0A0`
+
+*Onboarding tab behavior (JS):*
+- On submit: `POST /api/onboarding`; show inline status message on success
+  or error; display returned profile fields in a read-only summary panel
+  below the form
+- Client-side validation mirrors backend: name, email format, prompt required
+
+*Profile tab behavior (JS):*
+- On tab activation: `GET /api/profile`; render returned `UserProfile` fields
+  as a structured read-only display (stated interests, dislikes, vibe
+  preferences, category weights, etc.)
+- Empty state: italic message prompting user to complete onboarding
+
+**`pyproject.toml` changes:**
+- Remove `gradio>=4.0` from `[web]` optional dependency
+- Add `fastapi>=0.111`, `uvicorn>=0.29`, `python-multipart>=0.0.9`
+
+**`docker/web/Dockerfile` changes:**
+- Update `CMD` to: `uv run uvicorn scene_scout.web.app:app --host 0.0.0.0
+  --port 7860`
+- Remove `GRADIO_SERVER_PORT` env var; keep `WEB_SERVER_PORT=7860`
+- Ensure `scene_scout/web/static/` is copied into the image
+
+**Done when:**
+- `docker-compose up` starts the web container without error
+- Navigating to `http://localhost:7860` renders the SceneScout onboarding
+  page with the correct design: cream background, supper club pattern,
+  Cormorant Garant brand name in forest green, cognac amber tagline,
+  ruled underline inputs, outlined CTA button
+- Submitting valid onboarding data calls the User Preference Agent and
+  displays the saved profile
+- The Profile tab loads and displays the current `UserProfile`
+- The "Let Allegra in" button hover state fills to deep forest `#1F5C38`
+- `GET /health` returns `{"status": "ok"}`
+- `GRADIO_PASSWORD` set → Basic Auth prompt appears before the page loads
+- `scene_scout/gradio_app.py` is deleted from the repository
 
 ### 7.6 — Resend & Email Delivery Setup (operator)
 **Files:** `.env.example`, `README.md` (extend env table)
@@ -643,7 +759,7 @@ invoke). Does not send email or call LLM providers.
 | Resend operator setup (account, domain, API key) | Deferred — see 7.6 | 7.6 |
 | Log retention (90 days) | ✓ Confirmed | 10 |
 | Test strategy (mock unit / golden regression) | ✓ Confirmed | 3 |
-| Gradio auth (built-in) | ✓ Confirmed | 7 |
+| Web UI framework (FastAPI + custom HTML/CSS/JS) | ✓ Confirmed — replaces Gradio | 7.5 |
 | Feed ETag support (best-effort; fall through if unsupported) | ✓ Confirmed | 1 |
 | seen_entries cache key includes feed_id (source provenance preserved) | ✓ Confirmed | 2, 3 |
 | source_coverage as Ranking score component | ✓ Confirmed | 6 |
