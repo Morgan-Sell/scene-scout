@@ -7,6 +7,9 @@ Not a newsletter. Not a press release. A personal note.
 User profile summary: {profile_summary}
 Number of recommendations: {recommendation_count}
 Week of: {week_of}
+{% if below_minimum -%}
+Fewer than 10 events qualified this week — include Allegra's honest note in the intro.
+{% endif %}
 
 Write:
 1. An opening paragraph (2–3 sentences) that feels personal and sets the tone for
