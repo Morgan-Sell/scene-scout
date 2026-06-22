@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SceneScout</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=DM+Sans:wght@300&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/style.css?v=2" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <h1 class="brand">SceneScout</h1>
+        <p class="tagline">
+          <span class="tagline-lead">Meet Allegra.</span>
+          <span class="tagline-sub">She finds the nights worth keeping.</span>
+        </p>
+      </header>
+
+      <nav class="tabs" role="tablist" aria-label="Main">
+        <button
+          type="button"
+          class="tab active"
+          role="tab"
+          aria-selected="true"
+          aria-controls="panel-onboarding"
+          id="tab-onboarding"
+          data-tab="onboarding"
+        >
+          Onboarding
+        </button>
+        <button
+          type="button"
+          class="tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-profile"
+          id="tab-profile"
+          data-tab="profile"
+        >
+          Profile
+        </button>
+      </nav>
+
+      <p class="subtitle">
+        Your name, email, and what you love. That's all Allegra needs.
+      </p>
+
+      <section
+        id="panel-onboarding"
+        class="panel active"
+        role="tabpanel"
+        aria-labelledby="tab-onboarding"
+      >
+        <form id="onboarding-form" class="onboarding-form" novalidate>
+          <div class="field-row">
+            <div class="field">
+              <label for="name">Name</label>
+              <input
+                id="name"
+                name="name"
+                type="text"
+                autocomplete="name"
+                placeholder="Frank"
+                required
+              />
+            </div>
+            <div class="field">
+              <label for="email">Email</label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                autocomplete="email"
+                placeholder="frank.abagnale@catchme.com"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="prompt">Your taste</label>
+            <textarea
+              id="prompt"
+              name="prompt"
+              rows="4"
+              placeholder="Looking for exclusive events: the kind with a guest list, not a ticket counter. Art openings, supper clubs, anywhere people inherited their taste along with everything else."
+              required
+            ></textarea>
+          </div>
+
+          <p id="onboarding-status" class="status-message" hidden></p>
+
+          <button type="submit" class="cta-button">Let Allegra in →</button>
+
+          <div id="profile-summary" class="profile-summary" hidden></div>
+        </form>
+      </section>
+
+      <section
+        id="panel-profile"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-profile"
+        hidden
+      >
+        <div id="profile-display" class="profile-display">
+          <p class="empty-state">Loading profile…</p>
+        </div>
+      </section>
+
+      <footer class="site-footer">
+        <p>
+          One profile, stored here. One email a week when your picks are ready
+          — nothing shared, nothing sold.
+        </p>
+      </footer>
+    </div>
+
+    <script src="/app.js?v=2"></script>
+  </body>
+</html>

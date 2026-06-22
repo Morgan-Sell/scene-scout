@@ -342,7 +342,7 @@ async def test_all_feeds_fetched_concurrently():
 
 
 # ---------------------------------------------------------------------------
-# Feed validation (for user-submitted URLs in Gradio)
+# Feed validation (for user-submitted URLs in the web UI)
 # ---------------------------------------------------------------------------
 
 

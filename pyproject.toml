@@ -33,7 +33,9 @@ dev = [
     "ruff>=0.15",            # Lint and format
 ]
 web = [
-    "gradio>=4.0",           # Gradio UI — web container only
+    "fastapi>=0.111",        # Web UI API — web container only
+    "uvicorn>=0.29",
+    "python-multipart>=0.0.9",
 ]
 
 [tool.pytest.ini_options]
@@ -51,5 +53,5 @@ where = ["."]
 include = ["scene_scout*"]
 
 [tool.setuptools.package-data]
-scene_scout = ["prompts/*.txt"]
+scene_scout = ["prompts/*.txt", "web/static/*"]
 

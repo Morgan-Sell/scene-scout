@@ -31,8 +31,8 @@ services:
     ports:
       - "7860:7860"
     environment:
-      GRADIO_SERVER_PORT: "7860"
-      GRADIO_PASSWORD: ${GRADIO_PASSWORD:-}
+      WEB_SERVER_PORT: "7860"
+      WEB_PASSWORD: ${WEB_PASSWORD:-}
       VOL_LOGS_DIR: /app/vol-logs
       VOL_PIPELINE_STATE_DIR: /app/vol-pipeline-state
     volumes: *shared-volumes
