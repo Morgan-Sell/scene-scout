@@ -17,7 +17,12 @@ Source files (edit these first, then sync the fenced blocks below):
 flowchart TD
     subgraph INFRA["Infrastructure"]
         MODAL["Modal Scheduler\nweekly cron"]
-        GRADIO["Gradio UI\nModal Web Endpoint\nbuilt-in auth"]
+    end
+
+    subgraph WEB["scene-scout-web"]
+        WEBUI["FastAPI Web UI\nonboarding + profile\nHTTP Basic auth"]
+        TR["GET /track\nclick signal + redirect"]
+        FB["GET /feedback\nnegative signal"]
     end
 
     subgraph PIPELINE["scene-scout-pipeline"]
@@ -48,11 +53,6 @@ flowchart TD
         end
 
         EV["Evaluation Agent\nLiteLLM-as-judge"]
-    end
-
-    subgraph WEB["scene-scout-web"]
-        TR["GET /track\nclick signal + redirect"]
-        FB["GET /feedback\nnegative signal"]
     end
 
     subgraph SERVICES["Shared Services — implemented"]
@@ -105,10 +105,10 @@ flowchart TD
     UP --> VP
     UP --> CH --> VC2
 
-    GRADIO <--> VP
-    GRADIO <--> VFB
-    GRADIO <--> VH
-    GRADIO <--> VL
+    WEBUI <--> VP
+    WEBUI <--> VFB
+    WEBUI <--> VH
+    WEBUI <--> VL
     EV --> VL
 
     LLM -.->|used by| EX

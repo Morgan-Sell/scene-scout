@@ -92,7 +92,7 @@ class PipelineState:
 
 | Layer | Technology | Rationale |
 |---|---|---|
-| UI | Gradio (built-in auth) | Python-native UI; cold-start, profile review, dev section |
+| UI | FastAPI + custom HTML/CSS/JS | Onboarding, profile review, dev section; HTTP Basic auth |
 | Vector store | Chroma | Liked-event embeddings for semantic similarity |
 | Embeddings | `sentence-transformers` (`all-MiniLM-L6-v2`) | Open-source, local, zero API cost |
 | LLM abstraction | **LiteLLM** | Unified interface over any provider; model is a config value |
@@ -102,7 +102,7 @@ class PipelineState:
 | Prompt templating | **Jinja2** via `render_prompt()` | Variable injection, conditionals, loops; validated |
 | Geocoding | Nominatim (OpenStreetMap) | Free, no API key; hyper-local POI within ~1 km |
 | Email delivery | **Resend** | Clean API, generous free tier |
-| Deployment | Modal | Scheduling, secrets, persistent volumes, Gradio serving |
+| Deployment | Modal | Scheduling, secrets, persistent volumes, web ASGI endpoint |
 | Containerization | Docker (2 containers) | `pipeline` + `web`; modular, not micro-service |
 | Package management | `uv` | Fast, deterministic |
 | Async HTTP | `httpx` (async) | Concurrent RSS fetching |
@@ -247,7 +247,7 @@ Two containers. No more.
 
 ```
 scene-scout-pipeline   ← weekly scheduled job; all pipeline agents
-scene-scout-web        ← Gradio UI + feedback/tracking endpoints
+scene-scout-web        ← FastAPI UI + feedback/tracking endpoints
 ```
 
 ```
@@ -291,7 +291,7 @@ table in `vol-cache` after each successful fetch and sent on the next request.
 
 Not all RSS feeds support these headers. This is best-effort. Feeds without support fall
 through to normal parsing. ETag support rate is logged per feed and visible in the
-Gradio Dev Section feed health dashboard.
+web Dev Section feed health dashboard.
 
 ### Problem 2: Re-Processing Known Entries (Entry-Level)
 
@@ -374,7 +374,7 @@ LLM_API_KEY    →  Modal secret: llm
 RESEND_API_KEY →  Modal secret: resend
 USER_EMAIL     →  Modal secret: user       ← source of truth for email delivery
 USER_NAME      →  Modal secret: user       ← used in email salutation
-GRADIO_PASSWORD → Modal secret: gradio
+WEB_PASSWORD   →  Modal secret: web
 ```
 
 Deploy is via Modal (Phase 11), not by running Docker Compose in production. GitHub
@@ -552,7 +552,7 @@ class CuratorConfig(BaseModel):
 
 ## User Onboarding
 
-On first use, the user provides via Gradio:
+On first use, the user provides via the web UI:
 1. **Name** — used in email salutation
 2. **Email address** — stored in Modal Secrets as `USER_EMAIL`; copied to `UserProfile`
 3. **Cold-start prompt** — free-text interests, dislikes, and constraints
@@ -578,7 +578,7 @@ Stated preferences → hard constraints. Revealed → soft adjustments within co
 1. Category weight decay — `e^(-λt)`, half-life ~30 days
 2. Chroma embedding similarity — cosine similarity to liked events
 3. Implicit non-negative signal — unflagged exposure → small upward pressure
-4. Periodic LLM profile revision (v2) — user approves diff in Gradio
+4. Periodic LLM profile revision (v2) — user approves diff in the web UI
 5. Wildcard slot — 1–2 moderate-fit, high-novelty slots per week
 
 ---
@@ -695,7 +695,7 @@ SceneScout separates **continuous integration** (merge gates), **continuous deli
 | Environment | Mechanism | Purpose |
 |---|---|---|
 | **Local** | `uv run`, `docker-compose up` (Phase 2.6) | Day-to-day development; volume mounts mirror prod layout |
-| **Production** | Modal — scheduled pipeline + Gradio endpoint (Phase 11) | Cron job, secrets, persistent volumes |
+| **Production** | Modal — scheduled pipeline + web ASGI endpoint (Phase 11) | Cron job, secrets, persistent volumes |
 
 Docker Compose is **dev parity**, not production CD. Do not conflate `docker-compose up`
 with `modal deploy` — same codebase, different entrypoints, secrets, and schedulers.
@@ -719,7 +719,7 @@ stays manual (or post-deploy operator step), not a GitHub Actions job on every P
 |---|---|
 | `.env` (local, gitignored) | Local dev; `DRY_RUN=true` by default in `.env.example` |
 | GitHub Actions secrets | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` for CD only (Phase 11) |
-| Modal Secrets | `LLM_API_KEY`, `RESEND_API_KEY`, `USER_EMAIL`, `GRADIO_PASSWORD` at runtime |
+| Modal Secrets | `LLM_API_KEY`, `RESEND_API_KEY`, `USER_EMAIL`, `WEB_PASSWORD` at runtime |
 
 Never commit API keys. CI pytest job must pass without them.
 
@@ -727,11 +727,10 @@ See `docs/project_plan.md` — Phase 2.10 (CI), Phase 11 (Modal deploy & CD).
 
 ---
 
-## Gradio UI
+## Web UI
 
-```python
-gr.Blocks(auth=("username", os.getenv("GRADIO_PASSWORD")))
-```
+FastAPI application (`scene_scout/web/app.py`) with a custom HTML/CSS/JS frontend.
+HTTP Basic auth when `WEB_PASSWORD` is set (username `scenescout`).
 
 **User-facing:** Onboarding, profile viewer/editor, feedback history, feed management.
 
@@ -1112,7 +1111,9 @@ scene-scout/
 ├── scene_scout/
 │   ├── __init__.py
 │   ├── cli.py
-│   ├── gradio_app.py
+│   ├── web/                          ← FastAPI UI (Phase 7.5)
+│   │   ├── app.py
+│   │   └── static/
 │   ├── modal_app.py                  ← Modal entrypoint (Phase 11.1)
 │   ├── orchestrator.py               ← run_id; PipelineState; seen_entries check
 │   ├── config.py

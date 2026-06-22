@@ -128,7 +128,7 @@ async def validate_feed(url: str) -> FeedHealthReport:
     """Validate a user-submitted RSS URL before saving it to config.
 
     Fetches, parses, and checks for at least one entry. Returns a health
-    report that the Gradio UI displays before persisting the feed.
+    report that the web UI displays before persisting the feed.
 
     Parameters
     ----------

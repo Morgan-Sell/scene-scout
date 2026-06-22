@@ -94,7 +94,7 @@ correct agent colors. `--dry-run` and `--verbose` flags are recognized.
 ### 2.6 — Docker and Compose
 **Files:** `docker/pipeline/Dockerfile`, `docker/web/Dockerfile`, `docker-compose.yml`
 **Done when:** `docker-compose up` starts both containers without error. Pipeline
-container runs the orchestrator stub. Web container starts a placeholder Gradio page.
+container runs the orchestrator stub. Web container starts the FastAPI onboarding UI.
 Both containers resolve shared volume mounts.
 
 ### 2.7 — Batch Strategy Service
@@ -470,14 +470,13 @@ raises `LLMInfrastructureError`.
 `docker/web/Dockerfile` (update),
 `pyproject.toml` (update `web` extra)
 
-**Replaces:** `scene_scout/gradio_app.py` (delete)
+**Replaces:** placeholder web module (`scene_scout/gradio_app.py`, deleted)
 
-**Context:** Gradio's theming system cannot produce the desired visual design.
-This subphase replaces it with a lightweight FastAPI backend + fully custom
-HTML/CSS/JS frontend. The Python business logic from `gradio_app.py`
-(validation, profile loading, User Preference Agent call) moves into FastAPI
-route handlers. The frontend is a single-page HTML application with no
-JavaScript framework.
+**Context:** The prior placeholder UI could not achieve the desired visual design.
+This subphase uses a lightweight FastAPI backend + fully custom
+HTML/CSS/JS frontend. Validation, profile loading, and the User Preference
+Agent call live in FastAPI route handlers. The frontend is a single-page
+HTML application with no JavaScript framework.
 
 **Backend — `scene_scout/web/app.py`:**
 - FastAPI application with the following routes:
@@ -487,11 +486,10 @@ JavaScript framework.
   - `GET /api/profile` — loads and returns current `UserProfile` as JSON;
     returns `404` with `{error}` if no profile exists
   - `GET /health` — returns `{"status": "ok"}` for container health checks
-- Input validation mirrors `_validate_onboarding_inputs()` from `gradio_app.py`
+- Input validation in `validate_onboarding_inputs()`
 - `LLMInfrastructureError` → HTTP 502; `LLMValidationError` → HTTP 422
 - Static files served from `scene_scout/web/static/` via `StaticFiles` mount
-- Auth: HTTP Basic via `GRADIO_PASSWORD` env var (reuse existing secret name);
-  if unset, auth is disabled (local dev default)
+- Auth: HTTP Basic via `WEB_PASSWORD` env var; if unset, auth is disabled (local dev default)
 - `uvicorn` used as the ASGI server
 - `main()` entry point reads `WEB_SERVER_PORT` (default `7860`)
 
@@ -504,25 +502,19 @@ The design language is **noir supper club** — a well-lit corner booth at a
 - Headings: Cormorant Garant (serif) — loaded from Google Fonts
 - Body / UI: DM Sans at weight 300 — loaded from Google Fonts
 - Brand name: Cormorant Garant 500, forest green `#2A7A4B`
-- Tagline: Cormorant Garant italic, cognac amber `#B07D3A`
+- Tagline lead: Cormorant Garant 500, cognac amber `#B07D3A` — "Meet Allegra."
+- Tagline sub: Cormorant Garant italic, muted warm gray `#A09080` — "She finds
+  the nights worth keeping."
 
 *Color palette:*
-- Background: warm cream `#FAF7F2`
+- Background: plain warm cream `#FAF7F2` (no pattern)
 - Primary text: deep warm charcoal `#2C2820`
 - Forest green `#2A7A4B` — brand name, active tab indicator, input focus
   state, button border and hover fill
-- Cognac amber `#B07D3A` — field labels, Allegra's name in footer,
-  tagline text
-- Muted warm gray `#A09080` — inactive tabs, footer body text
+- Cognac amber `#B07D3A` — field labels, tagline lead
+- Muted warm gray `#A09080` — inactive tabs, tagline sub, footer text
 - Border / divider: `#D4C9B8`
 - Input underline at rest: `#C8BAA8`
-
-*Background pattern:*
-A subtle SVG repeating pattern suggesting a 1950s jazz supper club atmosphere
-— think low-opacity geometric motifs (diamond grid, thin crossed lines, or
-scallop arcs) in `#D4C9B8` at roughly 5% opacity. The pattern must not
-compete with the content; it should only be perceptible on close inspection.
-Embed the SVG pattern as a CSS `background-image` data URI on `body`.
 
 *Layout and components:*
 - Two tabs: **Onboarding** and **Profile**; tab switching handled in
@@ -538,9 +530,8 @@ Embed the SVG pattern as a CSS `background-image` data URI on `body`.
   deep forest green `#1F5C38` on hover; 2px border-radius; letter-spacing
   0.12em; text uppercase; smooth `0.2s` transition
 - Footer line (below button, above page bottom): thin top border `#D4C9B8`;
-  italic Cormorant Garant; "**Allegra** — your personal arts & culture
-  concierge, here to find the nights worth keeping." with "Allegra" in
-  cognac amber
+  DM Sans, muted warm gray, centered fine print: "One profile, stored here.
+  One email a week when your picks are ready — nothing shared, nothing sold."
 - Subtitle copy below tabs: *"Your name, email, and what you love.
   That's all Allegra needs."* in italic Cormorant Garant, muted warm gray
 - Generous vertical rhythm throughout; no cramped spacing
@@ -559,28 +550,27 @@ Embed the SVG pattern as a CSS `background-image` data URI on `body`.
 - Empty state: italic message prompting user to complete onboarding
 
 **`pyproject.toml` changes:**
-- Remove `gradio>=4.0` from `[web]` optional dependency
-- Add `fastapi>=0.111`, `uvicorn>=0.29`, `python-multipart>=0.0.9`
+- Add `fastapi>=0.111`, `uvicorn>=0.29`, `python-multipart>=0.0.9` to `[web]` extra
 
 **`docker/web/Dockerfile` changes:**
 - Update `CMD` to: `uv run uvicorn scene_scout.web.app:app --host 0.0.0.0
   --port 7860`
-- Remove `GRADIO_SERVER_PORT` env var; keep `WEB_SERVER_PORT=7860`
+- Use `WEB_SERVER_PORT=7860` for the web container
 - Ensure `scene_scout/web/static/` is copied into the image
 
 **Done when:**
 - `docker-compose up` starts the web container without error
 - Navigating to `http://localhost:7860` renders the SceneScout onboarding
-  page with the correct design: cream background, supper club pattern,
-  Cormorant Garant brand name in forest green, cognac amber tagline,
-  ruled underline inputs, outlined CTA button
+  page with the correct design: plain cream background, Cormorant Garant
+  brand name in forest green, two-line tagline, ruled underline inputs,
+  outlined CTA button
 - Submitting valid onboarding data calls the User Preference Agent and
   displays the saved profile
 - The Profile tab loads and displays the current `UserProfile`
 - The "Let Allegra in" button hover state fills to deep forest `#1F5C38`
 - `GET /health` returns `{"status": "ok"}`
-- `GRADIO_PASSWORD` set → Basic Auth prompt appears before the page loads
-- `scene_scout/gradio_app.py` is deleted from the repository
+- `WEB_PASSWORD` set → Basic Auth prompt appears before the page loads
+- Placeholder `scene_scout/gradio_app.py` removed from the repository
 
 ### 7.6 — Resend & Email Delivery Setup (operator)
 **Files:** `.env.example`, `README.md` (extend env table)
@@ -672,7 +662,7 @@ category diversity check. Mocked LLM responses.
 ---
 
 ## Phase 10 — Observability and Dev Section
-*Goal: Pipeline is fully observable. Dev Section operational in Gradio.*
+*Goal: Pipeline is fully observable. Dev Section operational in the web UI.*
 
 ### 10.1 — Structured Run Logging
 **Files:** `scene_scout/logging/logger.py` (extend),
@@ -681,8 +671,8 @@ category diversity check. Mocked LLM responses.
 `level`, `message`, `data` (counts, cache stats, score distributions). 90-day retention
 enforced at pipeline start.
 
-### 10.2 — Gradio Dev Section
-**Files:** `scene_scout/gradio_app.py` (extend)
+### 10.2 — Web Dev Section
+**Files:** `scene_scout/web/app.py`, `scene_scout/web/static/` (extend)
 **Done when:** Dev Section tab displays: last 5 run logs (filterable by agent/level),
 feed health dashboard (last fetch per feed, ETag support flag, `seen_entries` hit rate,
 post-date-filter yield), dry-run trigger with email preview, recommendation history
@@ -717,8 +707,8 @@ start earlier (Phase 2.10 covers CI alone). Do not block Phase 3–10 on Modal d
 ### 11.1 — Modal Application Skeleton
 **Files:** `scene_scout/modal_app.py`, `docs/deployment.md`
 **Done when:** `modal deploy` publishes a stub app: scheduled pipeline function (cron),
-Gradio web endpoint placeholder, and documented Modal Secrets mapping (`llm`, `resend`,
-`user`, `gradio`). Persistent volumes (`vol-cache`, `vol-logs`, `vol-pipeline-state`,
+web ASGI endpoint placeholder, and documented Modal Secrets mapping (`llm`, `resend`,
+`user`, `web`). Persistent volumes (`vol-cache`, `vol-logs`, `vol-pipeline-state`,
 etc.) mounted per `docs/architecture.md`. Local `docker-compose` (Phase 2.6) remains
 the dev parity path — it is not production CD.
 
@@ -759,7 +749,7 @@ invoke). Does not send email or call LLM providers.
 | Resend operator setup (account, domain, API key) | Deferred — see 7.6 | 7.6 |
 | Log retention (90 days) | ✓ Confirmed | 10 |
 | Test strategy (mock unit / golden regression) | ✓ Confirmed | 3 |
-| Web UI framework (FastAPI + custom HTML/CSS/JS) | ✓ Confirmed — replaces Gradio | 7.5 |
+| Web UI framework (FastAPI + custom HTML/CSS/JS) | ✓ Confirmed | 7.5 |
 | Feed ETag support (best-effort; fall through if unsupported) | ✓ Confirmed | 1 |
 | seen_entries cache key includes feed_id (source provenance preserved) | ✓ Confirmed | 2, 3 |
 | source_coverage as Ranking score component | ✓ Confirmed | 6 |
@@ -829,7 +819,7 @@ modules import from there rather than duplicating setup.
 | Activity | When | Requires live API keys? | Sends email? |
 |---|---|---|---|
 | **`pytest` (CI)** | Every PR / push via GitHub Actions (Phase 2.10) | No — mocked LLM + HTTP | No |
-| **UAT `--dry-run`** | Local dev, Gradio Dev Section | Optional (pipeline may skip LLM until wired) | No — writes `email_preview.html` (Phase 7.7) |
+| **UAT `--dry-run`** | Local dev, web Dev Section | Optional (pipeline may skip LLM until wired) | No — writes `email_preview.html` (Phase 7.7) |
 | **Full UAT (live email)** | Manual, pre-release; requires 7.6 | Yes — LLM, Resend, feeds | Yes — real email to `USER_EMAIL` |
 | **Modal CD** | Merge/tag deploy (Phase 11) | Yes — in Modal Secrets, not in repo | Only on scheduled prod run, not on every deploy |
 

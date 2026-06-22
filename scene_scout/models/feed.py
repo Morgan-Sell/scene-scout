@@ -169,7 +169,7 @@ class FeedHealthReport(BaseModel):
     """The result of a single feed read attempt.
 
     Produced by the Feed Scout Agent after attempting to fetch and parse a
-    feed. Used for logging, monitoring, and the Gradio Dev Section feed
+    feed. Used for logging, monitoring, and the web Dev Section feed
     health dashboard. A health report is always returned, even on failure,
     so the orchestrator has full visibility into every feed's status.
 

@@ -3,7 +3,7 @@ Rich-configured logging for SceneScout agents.
 
 Terminal output uses a color-coded ``[AGENT_NAME]`` prefix per agent.
 Structured JSONL entries are written to ``vol-logs/{run_id}.jsonl`` for
-production observability and the Gradio Dev Section log viewer.
+production observability and the web Dev Section log viewer.
 """
 
 from __future__ import annotations

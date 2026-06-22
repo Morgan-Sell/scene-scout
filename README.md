@@ -103,7 +103,7 @@ Persistent volumes (local dev via env vars; production on Modal): `vol-cache`,
 - **Feedback loop** — "Not for me" and click tracking update your profile over time
   *(planned — Phase 8)*
 - **Recommendation memory** — History store avoids repeating recent picks *(planned — Phase 6)*
-- **Gradio UI** *(planned)* — Onboarding, profile review, feed health dev section
+- **Web UI** — FastAPI onboarding and profile viewer; Dev Section planned (Phase 10)
 
 ## Tech stack
 
@@ -118,7 +118,7 @@ Persistent volumes (local dev via env vars; production on Modal): `vol-cache`,
 | Geocoding | Nominatim + Overpass (OpenStreetMap) |
 | Vector store | Chroma + `sentence-transformers` *(Phase 6)* |
 | Email | Resend *(Phase 7)* |
-| UI | Gradio *(Phase 7)* |
+| UI | FastAPI + custom HTML/CSS/JS *(Phase 7.5)* |
 | Deploy | Modal *(Phase 11)* |
 | Local dev | Docker Compose (`pipeline` + `web` containers) |
 
@@ -134,7 +134,7 @@ scene-scout/
 │   ├── services/              # LLM, cache, batch, geocoding, prompt loader
 │   ├── orchestrator.py        # Pipeline sequencing and batch boundary
 │   ├── cli.py                 # UAT entry point
-│   └── gradio_app.py          # Placeholder web UI
+│   └── web/                   # FastAPI onboarding and profile UI
 ├── tests/
 │   ├── agents/                # Per-agent unit tests
 │   ├── services/              # Cache, geocoding tests
@@ -180,8 +180,8 @@ UAT writes per-run output to `output/uat_{run_id}/summary.json` with stage count
 docker compose up --build
 ```
 
-Starts the pipeline container (orchestrator stub) and web container (placeholder Gradio
-UI on port 7860). Shared named volumes mirror Modal persistent stores.
+Starts the pipeline container (orchestrator stub) and web container (FastAPI UI on
+port 7860). Shared named volumes mirror Modal persistent stores.
 
 ### Configuration
 
@@ -196,7 +196,7 @@ UI on port 7860). Shared named volumes mirror Modal persistent stores.
 | `LLM_MODEL` | LiteLLM model string (default: `claude-sonnet-4-6`) |
 | `LLM_API_KEY` | Provider API key |
 | `LLM_API_BASE` | Optional — Ollama or custom endpoint |
-| `GRADIO_PASSWORD` | Web UI auth password |
+| `WEB_PASSWORD` | Web UI HTTP Basic auth password (optional; disabled when unset) |
 | `VOL_*_DIR` | Override local volume paths (defaults under project root) |
 
 Use `--dry-run` on the CLI to run the pipeline without sending email. Full UAT with a
@@ -226,7 +226,7 @@ orchestrator. Feed Scout, ranking, email, and feedback remain stubbed.**
 | 4 | Normalization, deduplication, description quality, pre-enrichment filter | Done |
 | 5 | Enrichment batch (Talent, Vibe, Neighborhood), geocoding, golden tests | Done |
 | 6 | User preference, ranking, Chroma, curator | Planned |
-| 7 | Email composer, Gradio UI, full end-to-end UAT (wire Feed Scout) | Planned |
+| 7 | Email composer, web UI, full end-to-end UAT (wire Feed Scout) | In progress |
 | 8–9 | Feedback loop, evaluation, sell-out risk | Planned |
 | 11 | Modal deploy + CD | Planned |
 
@@ -244,7 +244,7 @@ orchestrator. Feed Scout, ranking, email, and feedback remain stubbed.**
 
 - Wire real Feed Scout into the orchestrator and run live RSS in UAT (Phase 7.6)
 - User Preference Agent and deterministic ranking with Chroma similarity (Phase 6)
-- Allegra curator, Resend email, and Gradio onboarding UI (Phase 6–7)
+- Allegra curator, Resend email, and web onboarding UI (Phase 6–7)
 - Modal deployment with scheduled runs and tracking endpoints (Phase 11)
 
 ---
