@@ -5,42 +5,144 @@
 # active: Set to false to disable without deleting the entry.
 
 feeds:
+  # --- Active NYC sources ---
+
+  - id: brooklynvegan
+    name: BrooklynVegan
+    url: https://www.brooklynvegan.com/feed/
+    city: New York
+    source_quality_score: 0.85
+    active: true
+    notes: "NYC music and show listings. Strong event signal."
+
+  - id: theskint
+    name: the skint
+    url: https://www.theskint.com/feed/
+    city: New York
+    source_quality_score: 0.90
+    active: true
+    notes: "Free and cheap NYC events. Curated weekly listings."
+
+  # --- NYC sources pending RSS support (HTML calendars / broken feeds) ---
+
+  - id: brooklynvegan_todo
+    name: BrooklynVegan — To Do / NYC shows
+    url: https://www.brooklynvegan.com/category/to-do/feed/
+    city: New York
+    source_quality_score: 0.90
+    active: false
+    notes: "PENDING: Feed URL returns 404 HTML (category page exists but /feed/ is dead)."
+
+  - id: dance_nyc
+    name: Dance/NYC RSS builder
+    url: https://www.dance.nyc/rss/
+    city: New York
+    source_quality_score: 0.75
+    active: false
+    notes: "PENDING: URL is an RSS builder page, not a feed endpoint."
+
+  - id: ohmyrockness_nyc
+    name: Oh My Rockness NYC
+    url: https://www.ohmyrockness.com/
+    city: New York
+    source_quality_score: 0.85
+    active: false
+    notes: "PENDING: Homepage is HTML, not RSS. Site exposes features.atom only."
+
+  - id: nypl_events
+    name: NYPL Events
+    url: https://www.nypl.org/events/calendar
+    city: New York
+    source_quality_score: 0.80
+    active: false
+    notes: "PENDING: HTML event calendar; no RSS feed available."
+
+  - id: bpl_calendar
+    name: Brooklyn Public Library Calendar
+    url: https://www.bklynlibrary.org/calendar
+    city: New York
+    source_quality_score: 0.75
+    active: false
+    notes: "PENDING: HTML event calendar; no RSS feed available."
+
+  - id: bpl_presents
+    name: BPL Presents
+    url: https://www.bklynlibrary.org/bpl-presents
+    city: New York
+    source_quality_score: 0.80
+    active: false
+    notes: "PENDING: HTML landing page; no RSS feed available."
+
+  # --- Retired LA-area sources ---
+
+  - id: latimes_local
+    name: LA Times Local
+    url: https://www.latimes.com/local/rss2.0.xml
+    city: Los Angeles
+    source_quality_score: 0.80
+    active: false
+    notes: "RETIRED: Switched pipeline to NYC feeds."
+
+  - id: lamag
+    name: LA Magazine
+    url: https://www.lamag.com/feed/
+    city: Los Angeles
+    source_quality_score: 0.75
+    active: false
+    notes: "RETIRED: Switched pipeline to NYC feeds."
+
+  - id: laconservancy
+    name: LA Conservancy
+    url: https://www.laconservancy.org/feed/
+    city: Los Angeles
+    source_quality_score: 0.85
+    active: false
+    notes: "RETIRED: Switched pipeline to NYC feeds."
+
+  - id: zocalo
+    name: Zócalo Public Square
+    url: https://www.zocalopublicsquare.org/feed/
+    city: Los Angeles
+    source_quality_score: 0.70
+    active: false
+    notes: "RETIRED: Switched pipeline to NYC feeds."
+
   - id: la_weekly_events
     name: LA Weekly Events
     url: https://www.laweekly.com/tag/events/feed/
     city: Los Angeles
     source_quality_score: 0.75
-    active: true
-    notes: "General LA events coverage. Mix of editorial and listings."
+    active: false
+    notes: "RETIRED: Feed responds but returns zero items."
 
   - id: the_shed_dtla
     name: The Broad Museum Events
     url: https://www.thebroad.org/rss.xml
     city: Los Angeles
     source_quality_score: 0.85
-    active: true
-    notes: "Museum events. Well-structured entries."
+    active: false
+    notes: "RETIRED: /rss.xml returns 404 HTML error page."
 
   - id: dublab
     name: dublab
     url: https://dublab.com/feed/
     city: Los Angeles
     source_quality_score: 0.80
-    active: true
-    notes: "Independent LA radio. Experimental music events and streams."
+    active: false
+    notes: "RETIRED: Site migrated; feed URL returns 404 HTML."
 
   - id: kcrw_events
     name: KCRW Events
     url: https://www.kcrw.com/music/shows/feed.xml
     city: Los Angeles
     source_quality_score: 0.80
-    active: true
-    notes: "KCRW public radio events. Reliable structure."
+    active: false
+    notes: "RETIRED: Feed URL unplugged (404)."
 
   - id: kcet_arts
     name: KCET Arts & Culture
     url: https://www.kcet.org/shows/artbound/feed
     city: Los Angeles
     source_quality_score: 0.70
-    active: true
-    notes: "LA arts coverage. Not always event-specific."
+    active: false
+    notes: "RETIRED: Artbound feed returns 404."

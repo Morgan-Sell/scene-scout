@@ -12,6 +12,7 @@ import pytest
 from scene_scout.cli import (
     build_parser,
     main,
+    print_uat_summary,
     run_uat,
     uat_output_dir,
     write_summary_json,
@@ -59,9 +60,26 @@ def test_write_summary_json_writes_pipeline_counts(tmp_path: Path) -> None:
         run_id=TEST_RUN_ID,
         user_prompt=SANDLOT_PROMPT,
         raw_entries=10,
+        feeds_fetched=3,
+        feeds_unchanged=1,
         seen_entries_cache_hits=3,
         seen_entries_cache_misses=7,
         seen_entries_hit_rate_pct=30.0,
+        enrichment_cache_hit_rates_pct={
+            "performer": 50.0,
+            "venue": 0.0,
+            "vibe": 100.0,
+        },
+        top_recommendations=[
+            {
+                "title": "Jazz Night",
+                "score": 0.91,
+                "source_count": 2,
+                "source_coverage": 0.67,
+                "wildcard_slot": False,
+            }
+        ],
+        email_preview_path="output/uat_test/email_preview.html",
     )
 
     summary_path = write_summary_json(run_dir, result)
@@ -70,10 +88,41 @@ def test_write_summary_json_writes_pipeline_counts(tmp_path: Path) -> None:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["run_id"] == TEST_RUN_ID
     assert summary["raw_entries"] == 10
+    assert summary["feeds_fetched"] == 3
+    assert summary["feeds_unchanged"] == 1
     assert summary["seen_entries_cache_hits"] == 3
     assert summary["seen_entries_cache_misses"] == 7
     assert summary["seen_entries_hit_rate_pct"] == 30.0
+    assert summary["enrichment_cache_hit_rates_pct"]["vibe"] == 100.0
+    assert summary["top_recommendations"][0]["source_count"] == 2
+    assert summary["email_preview_path"].endswith("email_preview.html")
     assert summary["pre_enrichment_discards"]["low_information"] == 0
+
+
+def test_print_uat_summary_renders_without_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt=SANDLOT_PROMPT,
+        feeds_fetched=2,
+        feeds_unchanged=1,
+        top_recommendations=[
+            {
+                "title": "Gallery Opening",
+                "score": 0.88,
+                "source_count": 1,
+                "source_coverage": 0.33,
+                "wildcard_slot": False,
+            }
+        ],
+    )
+
+    print_uat_summary(result)
+
+    captured = capsys.readouterr()
+    assert "Feeds UNCHANGED (304)" in captured.out
+    assert "Gallery Opening" in captured.out
 
 
 @pytest.mark.asyncio

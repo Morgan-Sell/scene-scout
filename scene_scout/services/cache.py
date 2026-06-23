@@ -84,6 +84,23 @@ class CacheService:
     def _record_miss(self, cache_type: str) -> None:
         self._misses[cache_type] += 1
 
+    def hit_rate_pct(self, cache_type: str) -> float:
+        """Return cache hit rate as a percentage for one cache type."""
+        hits = self._hits[cache_type]
+        misses = self._misses[cache_type]
+        total = hits + misses
+        if total == 0:
+            return 0.0
+        return round(100.0 * hits / total, 2)
+
+    def enrichment_cache_hit_rates(self) -> dict[str, float]:
+        """Return hit-rate percentages for enrichment cache tables."""
+        return {
+            "performer": self.hit_rate_pct("performer_cache"),
+            "venue": self.hit_rate_pct("venue_cache"),
+            "vibe": self.hit_rate_pct("vibe_cache"),
+        }
+
     def log_run_stats(self) -> None:
         """Log aggregate hit/miss counts for this run."""
         self._logger.info(
@@ -92,6 +109,7 @@ class CacheService:
                 "run_id": self._run_id,
                 "hits": dict(self._hits),
                 "misses": dict(self._misses),
+                "enrichment_hit_rates_pct": self.enrichment_cache_hit_rates(),
             },
         )
 

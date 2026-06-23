@@ -222,6 +222,8 @@ vol-logs/
 vol-pipeline-state/
 vol-cache/
 output/
+vol-chroma/
+vol-profiles/
 
 
 .DS_Store

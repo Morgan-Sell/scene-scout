@@ -94,6 +94,7 @@ def is_dry_run() -> bool:
 
 # Email delivery — Resend + Modal Secret recipient.
 USER_EMAIL: str | None = os.getenv("USER_EMAIL")
+USER_NAME: str = os.getenv("USER_NAME", "Friend")
 RESEND_API_KEY: str | None = os.getenv("RESEND_API_KEY")
 RESEND_FROM_EMAIL: str | None = os.getenv("RESEND_FROM_EMAIL") or os.getenv(
     "FROM_EMAIL"
