@@ -16,7 +16,6 @@ from scene_scout.models.feed import (
 )
 
 _PHASE_BY_TYPE: dict[SourceType, str] = {
-    "ical": "1B.2",
     "api": "1B.3",
     "scrape": "1B.4",
 }

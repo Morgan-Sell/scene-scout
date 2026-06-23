@@ -165,21 +165,13 @@ async def validate_feed(
         source_type=resolved_type,
     )
 
-    if resolved_type != "rss":
-        adapter = get_adapter(resolved_type)
-        _, report = await adapter.fetch(
-            config,
-            run_id="validation",
-            cache_hooks=CacheHooks(),
-        )
-        return report
-
+    adapter = get_adapter(resolved_type)
     async with httpx.AsyncClient(
         timeout=_FETCH_TIMEOUT_SECONDS,
         follow_redirects=True,
         headers={"User-Agent": _USER_AGENT},
     ) as client:
-        _, report = await get_adapter("rss").fetch(
+        _, report = await adapter.fetch(
             config,
             run_id="validation",
             cache_hooks=CacheHooks(client=client),
