@@ -1,0 +1,45 @@
+{
+  "pagination": {
+    "object_count": 2,
+    "page_number": 1,
+    "page_size": 50,
+    "page_count": 1,
+    "has_more_items": false
+  },
+  "events": [
+    {
+      "id": "123456789012",
+      "name": {"text": "Sandlot Summer Concert", "html": "Sandlot Summer Concert"},
+      "description": {
+        "text": "Live music under the lights at the neighborhood ball field.",
+        "html": "<p>Live music under the lights at the neighborhood ball field.</p>"
+      },
+      "url": "https://www.eventbrite.com/e/sandlot-summer-concert-123456789012",
+      "start": {
+        "timezone": "America/New_York",
+        "local": "2026-07-18T19:00:00",
+        "utc": "2026-07-18T23:00:00Z"
+      },
+      "organizer": {
+        "name": "Neighborhood Events Co"
+      },
+      "category": {
+        "name": "Music"
+      }
+    },
+    {
+      "id": "987654321098",
+      "name": {"text": "Author Talk: The Beast"},
+      "summary": {"text": "An evening with the author."},
+      "url": "https://www.eventbrite.com/e/author-talk-987654321098",
+      "start": {
+        "timezone": "America/New_York",
+        "local": "2026-07-22T18:30:00",
+        "utc": "2026-07-22T22:30:00Z"
+      },
+      "category": {
+        "name": "Arts"
+      }
+    }
+  ]
+}

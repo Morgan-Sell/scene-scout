@@ -82,6 +82,18 @@ feeds:
     active: false
     notes: "PENDING: HTML landing page; no RSS feed available."
 
+  - id: eventbrite_nyc
+    name: Eventbrite NYC
+    url: eventbrite://events/search
+    city: New York
+    source_quality_score: 0.70
+    source_type: api
+    active: false
+    cursor: "1"
+    notes: >
+      Eventbrite event search for New York (50 km radius). Set EVENTBRITE_API_TOKEN
+      in .env and active: true to enable. cursor is the 1-based start page.
+
   # --- Retired LA-area sources ---
 
   - id: latimes_local

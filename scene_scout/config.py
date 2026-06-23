@@ -105,6 +105,11 @@ def get_user_name() -> str:
     return os.getenv("USER_NAME", "Friend")
 
 
+def get_eventbrite_api_token() -> str | None:
+    """Return the Eventbrite private token for event search API calls."""
+    return os.getenv("EVENTBRITE_API_TOKEN")
+
+
 RESEND_API_KEY: str | None = os.getenv("RESEND_API_KEY")
 RESEND_FROM_EMAIL: str | None = os.getenv("RESEND_FROM_EMAIL") or os.getenv(
     "FROM_EMAIL"
