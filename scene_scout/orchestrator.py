@@ -34,8 +34,8 @@ from scene_scout.agents.description_quality import has_named_performer
 from scene_scout.agents.event_normalization import is_within_normalization_window
 from scene_scout.agents.user_preference import UserProfileNotFoundError
 from scene_scout.config import (
-    USER_EMAIL,
-    USER_NAME,
+    get_user_email,
+    get_user_name,
     load_feed_configs,
     vol_pipeline_state_dir,
 )
@@ -739,7 +739,9 @@ async def _resolve_user_profile(prompt: str, run_id: str) -> UserProfile:
         )
         return profile
     except UserProfileNotFoundError:
-        if not USER_EMAIL:
+        user_email = get_user_email()
+        user_name = get_user_name()
+        if not user_email:
             raise RuntimeError(
                 "No user profile found and USER_EMAIL is not configured. "
                 "Complete web onboarding or set USER_EMAIL in .env before UAT."
@@ -747,11 +749,11 @@ async def _resolve_user_profile(prompt: str, run_id: str) -> UserProfile:
 
         logger.info(
             "No persisted profile — parsing cold-start from UAT prompt",
-            data={"email": USER_EMAIL, "name": USER_NAME},
+            data={"email": user_email, "name": user_name},
         )
         return await user_preference.parse_cold_start(
-            name=USER_NAME,
-            email=USER_EMAIL,
+            name=user_name,
+            email=user_email,
             prompt=prompt,
             run_id=run_id,
         )
