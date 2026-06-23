@@ -1,0 +1,21 @@
+{
+  "pagination": {
+    "object_count": 1,
+    "page_number": 2,
+    "page_size": 50,
+    "page_count": 2,
+    "has_more_items": false
+  },
+  "events": [
+    {
+      "id": "111222333444",
+      "name": {"text": "Page Two Showcase"},
+      "url": "https://www.eventbrite.com/e/page-two-showcase-111222333444",
+      "start": {
+        "timezone": "America/New_York",
+        "local": "2026-08-01T20:00:00",
+        "utc": "2026-08-02T00:00:00Z"
+      }
+    }
+  ]
+}

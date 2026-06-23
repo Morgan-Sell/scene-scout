@@ -1,0 +1,10 @@
+{
+  "pagination": {
+    "object_count": 0,
+    "page_number": 1,
+    "page_size": 50,
+    "page_count": 0,
+    "has_more_items": false
+  },
+  "events": []
+}

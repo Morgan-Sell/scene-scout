@@ -405,12 +405,12 @@ async def test_ical_source_type_returns_entries():
 @respx.mock
 async def test_unimplemented_source_type_returns_health_report_without_entries():
     config = FeedConfig(
-        id="api_test",
-        name="Event API",
-        url="https://example.com/api/events",
+        id="scrape_test",
+        name="HTML Calendar",
+        url="https://example.com/calendar",
         city="New York",
         source_quality_score=0.8,
-        source_type="api",
+        source_type="scrape",
     )
 
     entries, reports = await feed_scout.run([config], run_id=TEST_RUN_ID)
@@ -418,8 +418,8 @@ async def test_unimplemented_source_type_returns_health_report_without_entries()
     assert entries == []
     assert len(reports) == 1
     assert reports[0].status == FeedStatus.UNREACHABLE
-    assert "api" in reports[0].error_message.lower()
-    assert reports[0].feed_id == "api_test"
+    assert "scrape" in reports[0].error_message.lower()
+    assert reports[0].feed_id == "scrape_test"
 
 
 @respx.mock
