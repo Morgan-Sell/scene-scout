@@ -29,6 +29,10 @@ in a fresh virtual environment.
 `RawFeedEntry`, `FeedHealthReport`, and `FeedStatus` (including `UNCHANGED = "unchanged"`)
 all validate correctly. Feed config loads and returns only active feeds.
 
+> **Note:** Phase 1 shipped with a single `config/feeds.yaml` (operator-edited). The
+> `global_feeds.yaml` / `user_feeds.yaml` split remains aspirational — see Phase 1B and
+> Open Items.
+
 ### 1.3 — Feed Scout Agent ✓
 **Files:** `scene_scout/agents/feed_scout.py`, `scene_scout/config.py`
 **Done when:**
@@ -52,6 +56,68 @@ all validate correctly. Feed config loads and returns only active feeds.
 - Multi-feed isolation (one failure doesn't stop others)
 - `run_id` propagation to every entry
 - `validate_feed()` success and failure
+
+---
+
+## Phase 1B — Multi-Source Ingestion
+*Goal: Expand beyond RSS-only ingestion while keeping the `RawFeedEntry` downstream
+contract unchanged.*
+
+Phase 1 delivers a working RSS pipeline. UAT showed that RSS alone is a weak event
+source: many feeds are editorial (news/lifestyle) rather than dated listings, and several
+NYC targets (NYPL, BPL, Oh My Rockness, Dance/NYC) expose HTML calendars or APIs — not
+RSS. Phase 1B adds pluggable source adapters without changing Event Extraction or
+downstream agents.
+
+**Branching:** One feature branch per subphase (e.g. `feat/1b-1-source-adapters`),
+merged to `main` after Phase 7.7.
+
+### 1B.1 — Source Type and Adapter Interface
+**Files:** `scene_scout/models/feed.py`, `config/feeds.yaml`, `scene_scout/config.py`,
+`scene_scout/agents/feed_scout.py` (refactor dispatch) or `scene_scout/agents/source_scout.py`
+**Done when:**
+- `FeedConfig` gains `source_type: Literal["rss", "ical", "api", "scrape"]` (default
+  `"rss"` — backward compatible with existing config)
+- Adapter protocol defined:
+  `fetch(config, run_id, cache_hooks) -> tuple[list[RawFeedEntry], FeedHealthReport]`
+- Feed Scout (or Source Scout) dispatches to the correct adapter per `source_type`
+- RSS path behavior unchanged; existing Feed Scout tests pass
+- `RawFeedEntry` contract unchanged — all adapters normalize to it
+- Per-source health reporting works regardless of type
+- `validate_feed()` extended to accept non-RSS URLs where applicable
+
+### 1B.2 — iCal/ICS Adapter
+**Files:** `scene_scout/agents/sources/ical.py` (or equivalent), `config/feeds.yaml`,
+`tests/agents/test_ical_source.py`, `pyproject.toml` (add `icalendar` or equivalent)
+**Done when:**
+- iCal adapter fetches `.ics` URLs and maps `VEVENT` fields to `RawFeedEntry` (title,
+  link, description, `published_raw` from DTSTART)
+- At least two NYC library calendars configured and active (NYPL, BPL — discover and
+  verify working ICS endpoints; update `feeds.yaml` from current `PENDING` HTML URLs)
+- Unit tests with fixture `.ics` files; health report on unreachable/malformed ICS
+- UAT `feed_health` shows non-zero entries from iCal sources
+
+### 1B.3 — Event API Connector
+**Files:** `scene_scout/agents/sources/event_api.py`, `scene_scout/config.py`,
+`.env.example`, `config/feeds.yaml`, `tests/agents/test_event_api_source.py`
+**Done when:**
+- One event platform integrated (Eventbrite **or** Songkick — decide at build time)
+- Uses existing `FeedConfig.cursor` for pagination / cursor state
+- Geo filter aligned with feed `city` (New York for current config)
+- API responses mapped to `RawFeedEntry`
+- Tests mock HTTP; CI passes without live API keys
+- Required env vars documented in `.env.example` (e.g. `EVENTBRITE_API_TOKEN`)
+
+### 1B.4 — HTML Calendar Scraper (Deferred / Per-Site)
+**Files:** `scene_scout/agents/sources/html_calendar.py`, `config/feeds.yaml`
+(per-site selector config), `tests/agents/test_html_calendar_source.py`
+**Done when:**
+- Adapter supports site-specific scrape configuration (selectors or embedded JSON API
+  discovery — prefer underlying XHR/JSON endpoints over brittle DOM scraping)
+- At least one NYC HTML-only source implemented (e.g. Oh My Rockness show listings or
+  Dance/NYC RSS builder output URL)
+- Scraper failures produce `FeedHealthReport` without halting the pipeline
+- **Defer** until 1B.1–1B.3 are complete; implement additional sites incrementally
 
 ---
 
@@ -764,6 +830,12 @@ invoke). Does not send email or call LLM providers.
 | Modal deploy + CD workflow | Planned — after Phase 7 | 11 |
 | Full UAT in CI | ✗ Not planned — manual release gate | 7, 11 |
 | Docker Compose vs Modal CD | ✓ Separate — Compose is local dev; Modal is prod | 2.6, 11 |
+| RSS-only ingestion limitation | ✓ Confirmed gap — UAT: news RSS yielded 0 extraction candidates | 1B |
+| Multi-source ingestion (adapter interface) | Planned — after Phase 7.7 | 1B |
+| `global_feeds.yaml` / `user_feeds.yaml` split | Aspirational — v1 uses single `config/feeds.yaml` | 1B or 10 |
+| Event API platform (Eventbrite vs Songkick) | Open — decide in 1B.3 | 1B.3 |
+| iCal library calendars (NYPL, BPL) | Planned — pending ICS URL discovery | 1B.2 |
+| HTML calendar scrapers | Deferred — per-site, after 1B.1–1B.3 | 1B.4 |
 
 ---
 

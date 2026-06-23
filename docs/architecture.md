@@ -744,6 +744,11 @@ dry-run trigger, recommendation history browser, cache inspection.
 
 ### 1. Feed Scout Agent
 
+RSS-only in Phase 1. **Phase 1B** adds pluggable source adapters (`rss`, `ical`, `api`,
+`scrape`) that all normalize to `RawFeedEntry` — see `docs/project_plan.md` Phase 1B.
+The agent name may evolve to Source Scout when dispatch is added; the orchestrator
+contract stays the same.
+
 | | |
 |---|---|
 | Inputs | `list[FeedConfig]`, `run_id: str` |
@@ -778,6 +783,7 @@ class FeedConfig(BaseModel):
     active: bool = True
     notes: Optional[str] = None
     cursor: Optional[str] = None  # Always None for RSS; reserved for cursor-based APIs
+    # Phase 1B (planned): source_type: Literal["rss", "ical", "api", "scrape"] = "rss"
 ```
 
 ---
@@ -1097,8 +1103,9 @@ scene-scout/
 ├── uv.lock
 ├── .env.example
 ├── config/
-│   ├── global_feeds.yaml
-│   └── user_feeds.yaml
+│   ├── feeds.yaml                  ← v1: single operator-edited source list (Phase 1)
+│   ├── global_feeds.yaml           ← aspirational: shipped defaults (Phase 1B or 10)
+│   └── user_feeds.yaml             ← aspirational: user-added sources via web UI
 ├── docs/
 │   ├── architecture.md
 │   ├── deployment.md                 ← Modal secrets, CD triggers (Phase 11)
