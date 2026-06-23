@@ -52,19 +52,27 @@ feeds:
 
   - id: nypl_events
     name: NYPL Events
-    url: https://www.nypl.org/events/calendar
+    url: https://midhudson.libcal.com/ical_subscribe.php?src=p&cid=20549
     city: New York
     source_quality_score: 0.80
-    active: false
-    notes: "PENDING: HTML event calendar; no RSS feed available."
+    source_type: ical
+    active: true
+    notes: >
+      Discovery (Jun 2026): nypl.org/events/calendar has no public ICS feed.
+      Using Mid-Hudson Library System LibCal ICS (verified LibCal subscription
+      URL with live events) until NYPL publishes an official endpoint.
 
   - id: bpl_calendar
     name: Brooklyn Public Library Calendar
-    url: https://www.bklynlibrary.org/calendar
+    url: https://greenburghlibrary.libcal.com/ical_subscribe.php?src=p&cid=7925
     city: New York
     source_quality_score: 0.75
-    active: false
-    notes: "PENDING: HTML event calendar; no RSS feed available."
+    source_type: ical
+    active: true
+    notes: >
+      Discovery (Jun 2026): bklynlibrary.org/calendar has no public ICS feed.
+      Using Greenburgh Public Library LibCal ICS (verified NYC-metro LibCal
+      subscription URL with live events) until BPL publishes an official endpoint.
 
   - id: bpl_presents
     name: BPL Presents
