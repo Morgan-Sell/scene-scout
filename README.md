@@ -164,7 +164,7 @@ uv run ruff format --check scene_scout tests
 ### Run the pipeline locally
 
 ```bash
-# Dry run — no email; orchestrator uses stub Feed Scout (empty entries unless mocked in tests)
+# Dry run — no email; full pipeline with live feeds (requires LLM_API_KEY)
 uv run python -m scene_scout.cli uat --prompt "jazz and outdoor events" --dry-run
 
 # Verbose agent logs
@@ -216,7 +216,7 @@ real inbox is a manual release gate (Phase 7).
 ## Status
 
 **Active development — ingest through enrichment is implemented and wired in the
-orchestrator. Feed Scout, ranking, email, and feedback remain stubbed.**
+orchestrator. Feed Scout, ranking, and email are wired for UAT; evaluation remains Phase 9.**
 
 | Phase | Scope | State |
 |---|---|---|
@@ -225,9 +225,9 @@ orchestrator. Feed Scout, ranking, email, and feedback remain stubbed.**
 | 3 | Extraction agent, golden tests, `seen_entries` in orchestrator | Done |
 | 4 | Normalization, deduplication, description quality, pre-enrichment filter | Done |
 | 5 | Enrichment batch (Talent, Vibe, Neighborhood), geocoding, golden tests | Done |
-| 6 | User preference, ranking, Chroma, curator | Planned |
-| 7 | Email composer, web UI, full end-to-end UAT (wire Feed Scout) | In progress |
-| 8–9 | Feedback loop, evaluation, sell-out risk | Planned |
+| 6 | User preference, ranking, Chroma, curator | Done |
+| 7 | Email composer, web UI, full end-to-end UAT | Done |
+| 8–9 | Feedback loop, evaluation | Planned |
 | 11 | Modal deploy + CD | Planned |
 
 ### What's working today
@@ -242,9 +242,8 @@ orchestrator. Feed Scout, ranking, email, and feedback remain stubbed.**
 
 ### What's next
 
-- Wire real Feed Scout into the orchestrator and run live RSS in UAT (Phase 7.6)
-- User Preference Agent and deterministic ranking with Chroma similarity (Phase 6)
-- Allegra curator, Resend email, and web onboarding UI (Phase 6–7)
+- Run live UAT: `uv run python -m scene_scout.cli uat --prompt "..." --dry-run` (needs `LLM_API_KEY`)
+- Resend live-email gate (7.6 operator setup) for non-dry-run sends
 - Modal deployment with scheduled runs and tracking endpoints (Phase 11)
 
 ---

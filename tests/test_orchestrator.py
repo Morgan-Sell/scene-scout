@@ -13,7 +13,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from scene_scout.cache_config import SEEN_ENTRIES_TTL_DAYS
+from scene_scout.curator_config import load_curator_config
 from scene_scout.logging import get_logger
+from scene_scout.models.curated import CuratorResult
+from scene_scout.models.email import EmailComposerResult
 from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.event import (
     EventCandidate,
@@ -21,6 +24,8 @@ from scene_scout.models.event import (
     NormalizedEvent,
 )
 from scene_scout.models.feed import RawFeedEntry
+from scene_scout.models.ranking import RankedEvent
+from scene_scout.models.user import UserProfile
 from scene_scout.orchestrator import (
     Orchestrator,
     PipelineResult,
@@ -30,8 +35,10 @@ from scene_scout.orchestrator import (
     _batch_results_for_agent,
     _partition_entries_by_seen_cache,
     _poll_enrichment_batch,
+    _resolve_user_profile,
     _seen_entries_hit_rate_pct,
     _store_seen_entries_after_normalization,
+    _top_recommendation_rows,
     clear_pipeline_state,
     compute_entry_hash,
     read_pipeline_state,
@@ -49,6 +56,86 @@ SANDLOT_PROMPT = (
 SANDLOT_FEED_ID = "sandlot-pickup-league"
 ENTRY_LINK = "https://example.com/great-bambino-night"
 ENTRY_PUBLISHED = "Fri, 06 Jun 2025 20:00:00 +0000"
+
+
+def _uat_profile() -> UserProfile:
+    now = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
+    return UserProfile(
+        user_id="smalls-uat",
+        name="Smalls",
+        email="smalls@example.com",
+        stated_interests=["baseball"],
+        vibe_preferences=["outdoor"],
+        category_weights={"baseball": 0.9},
+        created_at=now,
+        last_updated=now,
+    )
+
+
+def _empty_email_result(run_id: str) -> EmailComposerResult:
+    return EmailComposerResult(
+        html="<html><body>Allegra preview</body></html>",
+        subject=f"[UAT {run_id}] This week from Allegra — Smalls",
+        preview_path=Path(f"output/uat_{run_id}/email_preview.html"),
+        sent=False,
+    )
+
+
+@pytest.fixture(autouse=True)
+def mock_pipeline_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep orchestrator tests offline while exercising real wiring."""
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.feed_scout.run",
+        AsyncMock(return_value=([], [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator._resolve_user_profile",
+        AsyncMock(return_value=_uat_profile()),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.ranking.run",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.sellout_risk.run",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.recommendation_curator.run",
+        AsyncMock(
+            return_value=CuratorResult(
+                recommendations=[],
+                below_minimum=True,
+                curator_config=load_curator_config(),
+            )
+        ),
+    )
+
+    async def _email_side_effect(
+        recs: object,
+        profile: object,
+        run_id: str,
+        **kwargs: object,
+    ) -> EmailComposerResult:
+        return _empty_email_result(run_id)
+
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.email_composer.run",
+        AsyncMock(side_effect=_email_side_effect),
+    )
+
+
+@pytest.fixture
+def profiles_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    profiles_path = tmp_path / "vol-profiles"
+    profiles_path.mkdir()
+    monkeypatch.setattr(
+        "scene_scout.agents.user_preference.vol_profiles_dir",
+        lambda: profiles_path,
+    )
+    return profiles_path
 
 
 @pytest.fixture
@@ -274,7 +361,7 @@ async def test_orchestrator_seen_entries_cache_hit_bypasses_extraction(
 
     mock_extraction = AsyncMock(return_value=[])
     monkeypatch.setattr(
-        "scene_scout.orchestrator._stub_feed_scout",
+        "scene_scout.orchestrator.feed_scout.run",
         AsyncMock(return_value=([source_entry], [])),
     )
     monkeypatch.setattr(
@@ -321,7 +408,7 @@ async def test_orchestrator_seen_entries_cache_miss_runs_extraction_and_stores(
 
     mock_extraction = AsyncMock(return_value=[candidate])
     monkeypatch.setattr(
-        "scene_scout.orchestrator._stub_feed_scout",
+        "scene_scout.orchestrator.feed_scout.run",
         AsyncMock(return_value=([source_entry], [])),
     )
     monkeypatch.setattr(
@@ -370,7 +457,7 @@ async def test_orchestrator_expired_seen_entry_triggers_re_extraction(
 
     mock_extraction = AsyncMock(return_value=[candidate])
     monkeypatch.setattr(
-        "scene_scout.orchestrator._stub_feed_scout",
+        "scene_scout.orchestrator.feed_scout.run",
         AsyncMock(return_value=([source_entry], [])),
     )
     monkeypatch.setattr(
@@ -584,3 +671,85 @@ async def test_orchestrator_writes_batch_id_to_pipeline_state(
     assert batch_submitted.batch_id == "batch-sandlot-1993"
     assert len(batch_submitted.filtered_events) == 1
     assert read_pipeline_state() is None
+
+
+def test_top_recommendation_rows_includes_source_coverage() -> None:
+    event = _normalized_event(source_count=2)
+    ranked = RankedEvent(
+        event=EnrichedEvent.from_normalized(event),
+        score=0.82,
+        score_breakdown={
+            "category_fit": 0.8,
+            "vibe_fit": 0.7,
+            "semantic_similarity": 0.5,
+            "performer_affinity": 0.4,
+            "location": 0.6,
+            "novelty": 0.9,
+            "source_quality": 0.7,
+            "source_coverage": 0.67,
+            "description_quality": 0.75,
+        },
+        explanation="Great sandlot energy.",
+        run_id=TEST_RUN_ID,
+    )
+
+    rows = _top_recommendation_rows([ranked])
+
+    assert rows[0]["title"] == "The Great Bambino Night"
+    assert rows[0]["source_count"] == 2
+    assert rows[0]["source_coverage"] == 0.67
+
+
+@pytest.mark.asyncio
+async def test_resolve_user_profile_loads_existing(
+    profiles_dir: Path,
+) -> None:
+    profile = _uat_profile()
+    (profiles_dir / "profile.json").write_text(
+        profile.model_dump_json(),
+        encoding="utf-8",
+    )
+
+    loaded = await _resolve_user_profile(SANDLOT_PROMPT, TEST_RUN_ID)
+
+    assert loaded.user_id == profile.user_id
+
+
+@pytest.mark.asyncio
+async def test_resolve_user_profile_parses_cold_start_when_missing(
+    profiles_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("USER_EMAIL", "smalls@example.com")
+    monkeypatch.setenv("USER_NAME", "Smalls")
+    parsed = _uat_profile()
+    with patch(
+        "scene_scout.orchestrator.user_preference.parse_cold_start",
+        AsyncMock(return_value=parsed),
+    ) as mock_parse:
+        loaded = await _resolve_user_profile(SANDLOT_PROMPT, TEST_RUN_ID)
+
+    assert loaded == parsed
+    mock_parse.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_calls_email_composer_and_records_preview(
+    pipeline_state_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    email_mock = AsyncMock(
+        return_value=EmailComposerResult(
+            html="<html><body><p>Allegra</p></body></html>",
+            subject="[UAT test] Allegra",
+            preview_path=Path("output/uat_test/email_preview.html"),
+            sent=False,
+        )
+    )
+    monkeypatch.setattr("scene_scout.orchestrator.email_composer.run", email_mock)
+
+    result = await Orchestrator().run(SANDLOT_PROMPT)
+
+    email_mock.assert_awaited_once()
+    assert result.email_preview_path == "output/uat_test/email_preview.html"
+    assert result.email_sent is False

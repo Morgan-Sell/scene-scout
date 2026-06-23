@@ -1,7 +1,7 @@
 """
 Command-line interface for SceneScout.
 
-Provides UAT mode for running the full pipeline skeleton locally with
+Provides UAT mode for running the full pipeline locally with
 color-coded agent logs and per-run output directories.
 """
 
@@ -15,11 +15,16 @@ import os
 import sys
 from pathlib import Path
 
+from rich.console import Console
+from rich.table import Table
+
 from scene_scout.config import PROJECT_ROOT, is_dry_run
+from scene_scout.email_composer_config import EMAIL_PREVIEW_FILENAME
 from scene_scout.logging import configure_log_level, get_logger
 from scene_scout.orchestrator import Orchestrator, PipelineResult
 
 _OUTPUT_DIR = PROJECT_ROOT / "output"
+_CONSOLE = Console()
 
 
 def uat_output_dir(run_id: str) -> Path:
@@ -55,7 +60,10 @@ def write_summary_json(output_dir: Path, result: PipelineResult) -> Path:
     """
     summary = {
         "run_id": result.run_id,
+        "dry_run": is_dry_run(),
         "raw_entries": result.raw_entries,
+        "feeds_fetched": result.feeds_fetched,
+        "feed_health": result.feed_health,
         "feeds_unchanged": result.feeds_unchanged,
         "seen_entries_cache_hits": result.seen_entries_cache_hits,
         "seen_entries_cache_misses": result.seen_entries_cache_misses,
@@ -71,9 +79,13 @@ def write_summary_json(output_dir: Path, result: PipelineResult) -> Path:
             "in_exclude_window": result.pre_enrichment_discard_exclude_window,
         },
         "enriched_events": result.enriched_events,
+        "enrichment_cache_hit_rates_pct": result.enrichment_cache_hit_rates_pct,
         "ranked_events": result.ranked_events,
         "after_sellout_risk": result.after_sellout_risk,
         "curated_recommendations": result.curated_recommendations,
+        "top_recommendations": result.top_recommendations,
+        "email_preview_path": result.email_preview_path,
+        "email_sent": result.email_sent,
         "evaluation_flags": result.evaluation_flags,
     }
     summary_path = output_dir / "summary.json"
@@ -82,6 +94,124 @@ def write_summary_json(output_dir: Path, result: PipelineResult) -> Path:
         encoding="utf-8",
     )
     return summary_path
+
+
+def print_uat_summary(result: PipelineResult) -> None:
+    """Print the UAT pipeline summary table to the terminal."""
+    pipeline_table = Table(
+        title=f"SceneScout UAT — {result.run_id}",
+        show_header=True,
+        header_style="bold",
+    )
+    pipeline_table.add_column("Stage", style="cyan")
+    pipeline_table.add_column("Count", justify="right")
+
+    pipeline_table.add_row("Feeds fetched", str(result.feeds_fetched))
+    pipeline_table.add_row("Feeds UNCHANGED (304)", str(result.feeds_unchanged))
+    pipeline_table.add_row("Raw entries", str(result.raw_entries))
+
+    if result.feed_health:
+        feed_table = Table(
+            title="Feed health",
+            show_header=True,
+            header_style="bold",
+        )
+        feed_table.add_column("Feed", style="cyan")
+        feed_table.add_column("Status")
+        feed_table.add_column("Entries", justify="right")
+        feed_table.add_column("Error")
+        for report in result.feed_health:
+            feed_table.add_row(
+                report["feed_name"],
+                report["status"],
+                str(report["entries_fetched"]),
+                report.get("error_message") or "—",
+            )
+        _CONSOLE.print(feed_table)
+    pipeline_table.add_row(
+        "seen_entries cache hits",
+        str(result.seen_entries_cache_hits),
+    )
+    pipeline_table.add_row(
+        "seen_entries cache misses",
+        str(result.seen_entries_cache_misses),
+    )
+    pipeline_table.add_row(
+        "seen_entries hit rate",
+        f"{result.seen_entries_hit_rate_pct:.1f}%",
+    )
+    pipeline_table.add_row("Extraction candidates", str(result.extraction_candidates))
+    pipeline_table.add_row("Normalized events", str(result.normalized_events))
+    pipeline_table.add_row("After deduplication", str(result.deduplicated_events))
+    pipeline_table.add_row(
+        "After description quality",
+        str(result.after_description_quality),
+    )
+    pipeline_table.add_row(
+        "After pre-enrichment filter",
+        str(result.after_pre_enrichment_filter),
+    )
+    pipeline_table.add_row(
+        "Discarded — low information",
+        str(result.pre_enrichment_discard_low_information),
+    )
+    pipeline_table.add_row(
+        "Discarded — outside coming week",
+        str(result.pre_enrichment_discard_outside_week),
+    )
+    pipeline_table.add_row(
+        "Discarded — exclude window",
+        str(result.pre_enrichment_discard_exclude_window),
+    )
+    pipeline_table.add_row("Enriched events", str(result.enriched_events))
+    pipeline_table.add_row("Ranked events", str(result.ranked_events))
+    pipeline_table.add_row(
+        "Curated recommendations",
+        str(result.curated_recommendations),
+    )
+
+    for cache_name, hit_rate in result.enrichment_cache_hit_rates_pct.items():
+        pipeline_table.add_row(
+            f"Enrichment cache hit rate — {cache_name}",
+            f"{hit_rate:.1f}%",
+        )
+
+    pipeline_table.add_row(
+        "Email sent",
+        "yes" if result.email_sent else ("no (dry-run)" if is_dry_run() else "no"),
+    )
+
+    _CONSOLE.print(pipeline_table)
+
+    if result.top_recommendations:
+        top_table = Table(
+            title="Top recommendations",
+            show_header=True,
+            header_style="bold",
+        )
+        top_table.add_column("#", justify="right")
+        top_table.add_column("Title")
+        top_table.add_column("Score", justify="right")
+        top_table.add_column("Sources", justify="right")
+        top_table.add_column("Coverage", justify="right")
+
+        for index, row in enumerate(result.top_recommendations, start=1):
+            top_table.add_row(
+                str(index),
+                row["title"],
+                f"{row['score']:.3f}",
+                str(row["source_count"]),
+                f"{row['source_coverage']:.3f}",
+            )
+
+        _CONSOLE.print(top_table)
+
+    if result.email_preview_path:
+        _CONSOLE.print(f"\nEmail preview: [green]{result.email_preview_path}[/green]")
+    else:
+        preview_path = uat_output_dir(result.run_id) / EMAIL_PREVIEW_FILENAME
+        if preview_path.is_file():
+            _CONSOLE.print(f"\nEmail preview: [green]{preview_path}[/green]")
 
 
 async def run_uat(
@@ -120,6 +250,7 @@ async def run_uat(
     output_dir = uat_output_dir(result.run_id)
     output_dir.mkdir(parents=True, exist_ok=True)
     write_summary_json(output_dir, result)
+    print_uat_summary(result)
 
     logger = get_logger("orchestrator", run_id=result.run_id)
     logger.info(
@@ -128,6 +259,8 @@ async def run_uat(
             "dry_run": is_dry_run(),
             "output_dir": str(output_dir),
             "curated_recommendations": result.curated_recommendations,
+            "email_preview_path": result.email_preview_path,
+            "email_sent": result.email_sent,
         },
     )
 

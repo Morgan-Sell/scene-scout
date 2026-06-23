@@ -8,8 +8,8 @@ Analyze the entry below and return a single JSON object with exactly these keys:
 - time (string or null): Event time as written — do not reformat or parse
 - venue (string or null): Venue or location name
 - neighborhood (string or null): Neighborhood, district, or area if mentioned
-- city (string, required): City; default to Los Angeles only when context clearly
-  suggests LA and no other city is stated
+- city (string, required): City; default to New York only when context clearly
+  suggests NYC and no other city is stated
 - url (string, required): Direct URL to the event page (use the entry link when present)
 - price (string or null): Price as written (e.g. "$15", "Free", "$10-$20", "Donation")
 - description (string or null): Clean summary of the event in 2–4 sentences max

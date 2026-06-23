@@ -93,7 +93,18 @@ def is_dry_run() -> bool:
 
 
 # Email delivery — Resend + Modal Secret recipient.
-USER_EMAIL: str | None = os.getenv("USER_EMAIL")
+
+
+def get_user_email() -> str | None:
+    """Return the configured recipient email (read at call time for testability)."""
+    return os.getenv("USER_EMAIL")
+
+
+def get_user_name() -> str:
+    """Return the configured user display name for cold-start / salutation."""
+    return os.getenv("USER_NAME", "Friend")
+
+
 RESEND_API_KEY: str | None = os.getenv("RESEND_API_KEY")
 RESEND_FROM_EMAIL: str | None = os.getenv("RESEND_FROM_EMAIL") or os.getenv(
     "FROM_EMAIL"

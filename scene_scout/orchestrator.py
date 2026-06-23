@@ -3,10 +3,6 @@ SceneScout pipeline orchestrator.
 
 Generates ``run_id``, sequences agent calls, persists ``PipelineState`` at the
 batch boundary, and returns per-stage counts in ``PipelineResult``.
-
-Phase 2.4 skeleton: all agents are stubs returning empty lists. Real agent
-implementations replace stubs in later phases without changing the orchestration
-shape.
 """
 
 from __future__ import annotations
@@ -22,20 +18,34 @@ from typing import Any
 from scene_scout.agents import (
     deduplication,
     description_quality,
+    email_composer,
     event_extraction,
     event_normalization,
+    feed_scout,
     neighborhood_scout,
+    ranking,
+    recommendation_curator,
+    sellout_risk,
     talent_scout,
+    user_preference,
     vibe_classifier,
 )
 from scene_scout.agents.description_quality import has_named_performer
 from scene_scout.agents.event_normalization import is_within_normalization_window
-from scene_scout.config import vol_pipeline_state_dir
+from scene_scout.agents.user_preference import UserProfileNotFoundError
+from scene_scout.config import (
+    get_user_email,
+    get_user_name,
+    load_feed_configs,
+    vol_pipeline_state_dir,
+)
 from scene_scout.db import run_migrations
 from scene_scout.logging import get_logger
 from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.event import NormalizedEvent
-from scene_scout.models.feed import RawFeedEntry
+from scene_scout.models.feed import FeedStatus, RawFeedEntry
+from scene_scout.models.ranking import RankedEvent
+from scene_scout.models.user import UserProfile
 from scene_scout.orchestrator_config import ENRICHMENT_BATCH_POLL_INTERVAL_SECONDS
 from scene_scout.pre_enrichment_filter_config import (
     PRE_ENRICHMENT_COMING_WEEK_DAYS,
@@ -162,7 +172,19 @@ class PipelineResult:
     curated_recommendations : int
         Final recommendations from the Curator Agent.
     evaluation_flags : int
-        Issues flagged by the Evaluation Agent.
+        Issues flagged by the Evaluation Agent (Phase 9 — not yet wired).
+    feeds_fetched : int
+        Number of active feeds processed by Feed Scout.
+    feed_health : list[dict[str, Any]]
+        Per-feed status from Feed Scout (status, entries, error).
+    enrichment_cache_hit_rates_pct : dict[str, float]
+        Hit-rate percentages for performer, venue, and vibe caches.
+    top_recommendations : list[dict[str, Any]]
+        Top ranked events with title, score, source_count, and source_coverage.
+    email_preview_path : str | None
+        Path to ``email_preview.html`` when Email Composer ran.
+    email_sent : bool
+        Whether Resend delivery succeeded (``False`` during dry-run).
     """
 
     run_id: str
@@ -185,6 +207,12 @@ class PipelineResult:
     after_sellout_risk: int = 0
     curated_recommendations: int = 0
     evaluation_flags: int = 0
+    feeds_fetched: int = 0
+    feed_health: list[dict[str, Any]] = field(default_factory=list)
+    enrichment_cache_hit_rates_pct: dict[str, float] = field(default_factory=dict)
+    top_recommendations: list[dict[str, Any]] = field(default_factory=list)
+    email_preview_path: str | None = None
+    email_sent: bool = False
 
 
 def _pipeline_state_dir() -> Path:
@@ -679,43 +707,56 @@ async def _apply_enrichment_batch(
     return enriched
 
 
-# ---------------------------------------------------------------------------
-# Agent stubs — replaced by real agents in later phases
-# ---------------------------------------------------------------------------
+def _top_recommendation_rows(
+    ranked: list[RankedEvent],
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Serialize top ranked events for UAT summary output."""
+    rows: list[dict[str, Any]] = []
+    for ranked_event in ranked[:limit]:
+        breakdown = ranked_event.score_breakdown
+        rows.append(
+            {
+                "title": ranked_event.event.title,
+                "score": round(ranked_event.score, 4),
+                "source_count": ranked_event.event.source_count,
+                "source_coverage": round(breakdown.get("source_coverage", 0.0), 4),
+                "wildcard_slot": ranked_event.wildcard_slot,
+            }
+        )
+    return rows
 
 
-async def _stub_user_preference(prompt: str, run_id: str) -> dict[str, Any]:
-    """Stub for User Preference Agent."""
-    return {}
+async def _resolve_user_profile(prompt: str, run_id: str) -> UserProfile:
+    """Load a persisted profile or parse one from the UAT prompt."""
+    logger = get_logger("orchestrator", run_id=run_id)
+    try:
+        profile = user_preference.load_profile()
+        logger.info(
+            "Loaded persisted user profile",
+            data={"user_id": profile.user_id, "name": profile.name},
+        )
+        return profile
+    except UserProfileNotFoundError:
+        user_email = get_user_email()
+        user_name = get_user_name()
+        if not user_email:
+            raise RuntimeError(
+                "No user profile found and USER_EMAIL is not configured. "
+                "Complete web onboarding or set USER_EMAIL in .env before UAT."
+            ) from None
 
-
-async def _stub_feed_scout(run_id: str) -> tuple[list[Any], list[Any]]:
-    """Stub for Feed Scout Agent."""
-    return [], []
-
-
-async def _stub_ranking(events: list[Any], run_id: str) -> list[Any]:
-    """Stub for Ranking Agent."""
-    return []
-
-
-async def _stub_sellout_risk(events: list[Any], run_id: str) -> list[Any]:
-    """Stub for Sell-Out Risk Agent."""
-    return []
-
-
-async def _stub_recommendation_curator(events: list[Any], run_id: str) -> list[Any]:
-    """Stub for Recommendation Curator Agent."""
-    return []
-
-
-async def _stub_email_composer(recommendations: list[Any], run_id: str) -> None:
-    """Stub for Email Composer Agent."""
-
-
-async def _stub_evaluation(recommendations: list[Any], run_id: str) -> list[Any]:
-    """Stub for Evaluation Agent."""
-    return []
+        logger.info(
+            "No persisted profile — parsing cold-start from UAT prompt",
+            data={"email": user_email, "name": user_name},
+        )
+        return await user_preference.parse_cold_start(
+            name=user_name,
+            email=user_email,
+            prompt=prompt,
+            run_id=run_id,
+        )
 
 
 class Orchestrator:
@@ -746,13 +787,32 @@ class Orchestrator:
 
         run_migrations()
 
-        await _stub_user_preference(prompt, run_id)
-
-        entries, _reports = await _stub_feed_scout(run_id)
-        result.raw_entries = len(entries)
-        result.feeds_unchanged = 0
+        profile = await _resolve_user_profile(prompt, run_id)
 
         cache = CacheService(run_id=run_id)
+        feed_configs = load_feed_configs()
+        entries, feed_reports = await feed_scout.run(
+            feed_configs,
+            run_id,
+            get_feed_etag=cache.get_feed_etag,
+            store_feed_etag=cache.set_feed_etag,
+        )
+        result.raw_entries = len(entries)
+        result.feeds_fetched = len(feed_reports)
+        result.feed_health = [
+            {
+                "feed_id": report.feed_id,
+                "feed_name": report.feed_name,
+                "status": report.status.value,
+                "entries_fetched": report.entries_fetched,
+                "error_message": report.error_message,
+            }
+            for report in feed_reports
+        ]
+        result.feeds_unchanged = sum(
+            1 for report in feed_reports if report.status == FeedStatus.UNCHANGED
+        )
+
         (
             cached_events,
             entries_for_extraction,
@@ -868,19 +928,34 @@ class Orchestrator:
         )
         result.enriched_events = len(enriched)
 
-        ranked = await _stub_ranking(enriched, run_id)
+        ranked = await ranking.run(enriched, profile, run_id)
         result.ranked_events = len(ranked)
+        result.top_recommendations = _top_recommendation_rows(ranked)
 
-        risk_scored = await _stub_sellout_risk(ranked, run_id)
+        risk_scored = await sellout_risk.run(ranked, run_id)
         result.after_sellout_risk = len(risk_scored)
 
-        curated = await _stub_recommendation_curator(risk_scored, run_id)
+        curator_result = await recommendation_curator.run(
+            risk_scored,
+            profile,
+            run_id,
+        )
+        curated = curator_result.recommendations
         result.curated_recommendations = len(curated)
 
-        await _stub_email_composer(curated, run_id)
+        email_result = await email_composer.run(
+            curated,
+            profile,
+            run_id,
+            below_minimum=curator_result.below_minimum,
+            curator_config=curator_result.curator_config,
+        )
+        if email_result.preview_path is not None:
+            result.email_preview_path = str(email_result.preview_path)
+        result.email_sent = email_result.sent
 
-        evaluation = await _stub_evaluation(curated, run_id)
-        result.evaluation_flags = len(evaluation)
+        result.enrichment_cache_hit_rates_pct = cache.enrichment_cache_hit_rates()
+        result.evaluation_flags = 0
 
         state.phase = "complete"
         clear_pipeline_state()
@@ -891,16 +966,21 @@ class Orchestrator:
             "Pipeline complete",
             data={
                 "raw_entries": result.raw_entries,
+                "feeds_fetched": result.feeds_fetched,
+                "feeds_unchanged": result.feeds_unchanged,
                 "seen_entries_cache_hits": result.seen_entries_cache_hits,
                 "seen_entries_cache_misses": result.seen_entries_cache_misses,
                 "seen_entries_hit_rate_pct": result.seen_entries_hit_rate_pct,
                 "after_pre_enrichment_filter": result.after_pre_enrichment_filter,
+                "enrichment_cache_hit_rates_pct": result.enrichment_cache_hit_rates_pct,
                 "pre_enrichment_discards": {
                     "low_information": result.pre_enrichment_discard_low_information,
                     "outside_coming_week": result.pre_enrichment_discard_outside_week,
                     "in_exclude_window": result.pre_enrichment_discard_exclude_window,
                 },
                 "curated_recommendations": result.curated_recommendations,
+                "email_sent": result.email_sent,
+                "email_preview_path": result.email_preview_path,
             },
         )
 
