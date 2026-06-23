@@ -90,7 +90,13 @@ def test_load_feed_configs_validates_schema():
         assert isinstance(config.id, str) and config.id
         assert isinstance(config.url, str) and config.url
         assert 0.0 <= config.source_quality_score <= 1.0
+        assert config.source_type == "rss"
         assert config.cursor is None  # Always None for RSS feeds
+
+
+def test_feed_config_defaults_source_type_to_rss():
+    config = _make_config()
+    assert config.source_type == "rss"
 
 
 def test_load_feed_configs_raises_on_missing_file():
@@ -366,3 +372,54 @@ async def test_validate_feed_returns_failure_for_dead_url():
 
     assert report.status == FeedStatus.UNREACHABLE
     assert report.succeeded is False
+
+
+# ---------------------------------------------------------------------------
+# Source type dispatch (Phase 1B.1)
+# ---------------------------------------------------------------------------
+
+
+async def test_unimplemented_source_type_returns_health_report_without_entries():
+    config = FeedConfig(
+        id="ical_test",
+        name="Library Calendar",
+        url="https://example.com/events.ics",
+        city="New York",
+        source_quality_score=0.8,
+        source_type="ical",
+    )
+
+    entries, reports = await feed_scout.run([config], run_id=TEST_RUN_ID)
+
+    assert entries == []
+    assert len(reports) == 1
+    assert reports[0].status == FeedStatus.UNREACHABLE
+    assert "ical" in reports[0].error_message.lower()
+    assert reports[0].feed_id == "ical_test"
+
+
+async def test_validate_feed_uses_explicit_source_type():
+    report = await feed_scout.validate_feed(
+        "https://example.com/events.ics",
+        source_type="ical",
+    )
+
+    assert report.status == FeedStatus.UNREACHABLE
+    assert "ical" in report.error_message.lower()
+
+
+@respx.mock
+async def test_validate_feed_infers_ical_from_ics_url():
+    url = "https://example.com/calendar.ics"
+    respx.get(url).mock(return_value=Response(200, text="BEGIN:VCALENDAR"))
+
+    report = await feed_scout.validate_feed(url)
+
+    assert report.status == FeedStatus.UNREACHABLE
+    assert "ical" in report.error_message.lower()
+
+
+def test_infer_source_type():
+    assert feed_scout.infer_source_type("https://example.com/feed") == "rss"
+    assert feed_scout.infer_source_type("https://example.com/events.ics") == "ical"
+    assert feed_scout.infer_source_type("https://example.com/FEED.ICS") == "ical"

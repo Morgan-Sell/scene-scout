@@ -1,6 +1,7 @@
 # SceneScout Feed Configuration
 #
-# Each feed entry defines an RSS source and its metadata.
+# Each feed entry defines an event source and its metadata.
+# source_type: rss (default) | ical | api | scrape — selects the ingestion adapter.
 # source_quality_score: 0.0–1.0. Higher = more reliable event data.
 # active: Set to false to disable without deleting the entry.
 

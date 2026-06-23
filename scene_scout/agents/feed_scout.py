@@ -3,14 +3,17 @@ Feed Scout Agent
 
 Responsibility
 --------------
-Fetch, parse, validate, and monitor configured RSS feeds concurrently.
-Produce raw feed entries and a health report for each feed.
+Fetch, parse, validate, and monitor configured event sources concurrently.
+Produce raw feed entries and a health report for each source.
+
+Dispatches to a pluggable adapter per ``FeedConfig.source_type`` (RSS, iCal,
+API, scrape). All adapters normalize to ``RawFeedEntry``.
 
 This agent is deliberately deterministic. No LLM is involved.
 Its job is reliability: read what is there, report what failed,
 pass everything downstream faithfully without interpretation.
 
-Two efficiency mechanisms are applied at this layer:
+Two efficiency mechanisms are applied at the RSS adapter layer:
 
 1. HTTP change detection (ETag / Last-Modified):
    Before parsing, sends conditional request headers. On 304 Not Modified,
@@ -28,23 +31,22 @@ Outputs : tuple[list[RawFeedEntry], list[FeedHealthReport]]
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from urllib.parse import urlparse
 
-import feedparser
 import httpx
 
+from scene_scout.agents.sources import CacheHooks, get_adapter
 from scene_scout.models.feed import (
     FeedConfig,
     FeedHealthReport,
-    FeedStatus,
     RawFeedEntry,
+    SourceType,
 )
 
 logger = logging.getLogger(__name__)
 
 _FETCH_TIMEOUT_SECONDS = 10
-_MIN_EXPECTED_ENTRIES = 1
+_USER_AGENT = "SceneScout/0.1 (event discovery agent)"
 
 
 async def run(
@@ -53,18 +55,18 @@ async def run(
     get_feed_etag=None,
     store_feed_etag=None,
 ) -> tuple[list[RawFeedEntry], list[FeedHealthReport]]:
-    """Fetch all configured feeds concurrently.
+    """Fetch all configured sources concurrently.
 
-    Uses asyncio.gather() so all feeds are in-flight simultaneously. Total
-    wall-clock time is bounded by the slowest feed, not the sum of all feeds.
+    Uses asyncio.gather() so all sources are in-flight simultaneously. Total
+    wall-clock time is bounded by the slowest source, not the sum of all sources.
 
-    A failure on one feed does not affect others. All failures are logged
-    and reported, not raised. UNCHANGED (304) feeds are logged and skipped.
+    A failure on one source does not affect others. All failures are logged
+    and reported, not raised. UNCHANGED (304) RSS feeds are logged and skipped.
 
     Parameters
     ----------
     feed_configs : list[FeedConfig]
-        Active feed configurations to process.
+        Active source configurations to process.
     run_id : str
         Pipeline run identifier, attached to every RawFeedEntry produced.
     get_feed_etag : callable, optional
@@ -77,18 +79,20 @@ async def run(
     Returns
     -------
     tuple[list[RawFeedEntry], list[FeedHealthReport]]
-        All raw entries fetched across all feeds, and a health report for
-        every feed regardless of success or failure status.
+        All raw entries fetched across all sources, and a health report for
+        every source regardless of success or failure status.
     """
     async with httpx.AsyncClient(
         timeout=_FETCH_TIMEOUT_SECONDS,
         follow_redirects=True,
-        headers={"User-Agent": "SceneScout/0.1 (event discovery agent)"},
+        headers={"User-Agent": _USER_AGENT},
     ) as client:
-        tasks = [
-            _fetch_feed(config, client, run_id, get_feed_etag, store_feed_etag)
-            for config in feed_configs
-        ]
+        cache_hooks = CacheHooks(
+            client=client,
+            get_feed_etag=get_feed_etag,
+            store_feed_etag=store_feed_etag,
+        )
+        tasks = [_fetch_source(config, run_id, cache_hooks) for config in feed_configs]
         results = await asyncio.gather(*tasks)
 
     all_entries: list[RawFeedEntry] = []
@@ -124,23 +128,33 @@ async def run(
     return all_entries, health_reports
 
 
-async def validate_feed(url: str) -> FeedHealthReport:
-    """Validate a user-submitted RSS URL before saving it to config.
+async def validate_feed(
+    url: str,
+    source_type: SourceType | None = None,
+) -> FeedHealthReport:
+    """Validate a user-submitted source URL before saving it to config.
 
-    Fetches, parses, and checks for at least one entry. Returns a health
-    report that the web UI displays before persisting the feed.
+    Fetches via the adapter for ``source_type`` and checks for at least one
+    entry where the adapter is implemented. Returns a health report that the
+    web UI displays before persisting the source.
+
+    When ``source_type`` is omitted, infers ``"ical"`` for ``.ics`` URLs and
+    defaults to ``"rss"`` otherwise.
 
     Parameters
     ----------
     url : str
-        The RSS URL to validate.
+        The source URL to validate.
+    source_type : SourceType, optional
+        Explicit adapter to use. Inferred from the URL when omitted.
 
     Returns
     -------
     FeedHealthReport
-        Health report indicating whether the feed is usable. The caller
-        should check `report.succeeded` before saving the feed.
+        Health report indicating whether the source is usable. The caller
+        should check ``report.succeeded`` before saving the source.
     """
+    resolved_type = source_type or infer_source_type(url)
     config = FeedConfig(
         id="__validation__",
         name=url,
@@ -148,233 +162,62 @@ async def validate_feed(url: str) -> FeedHealthReport:
         city="unknown",
         source_quality_score=0.5,
         active=True,
+        source_type=resolved_type,
     )
+
+    if resolved_type != "rss":
+        adapter = get_adapter(resolved_type)
+        _, report = await adapter.fetch(
+            config,
+            run_id="validation",
+            cache_hooks=CacheHooks(),
+        )
+        return report
+
     async with httpx.AsyncClient(
         timeout=_FETCH_TIMEOUT_SECONDS,
         follow_redirects=True,
-        headers={"User-Agent": "SceneScout/0.1 (event discovery agent)"},
+        headers={"User-Agent": _USER_AGENT},
     ) as client:
-        _, report = await _fetch_feed(config, client, run_id="validation")
+        _, report = await get_adapter("rss").fetch(
+            config,
+            run_id="validation",
+            cache_hooks=CacheHooks(client=client),
+        )
     return report
 
 
-async def _fetch_feed(
+def infer_source_type(url: str) -> SourceType:
+    """Infer a source type from a URL when not explicitly configured.
+
+    Parameters
+    ----------
+    url : str
+        Source URL to inspect.
+
+    Returns
+    -------
+    SourceType
+        ``"ical"`` for ``.ics`` paths; ``"rss"`` otherwise.
+    """
+    path = urlparse(url).path.lower()
+    if path.endswith(".ics"):
+        return "ical"
+    return "rss"
+
+
+async def _fetch_source(
     config: FeedConfig,
-    client: httpx.AsyncClient,
     run_id: str,
-    get_feed_etag=None,
-    store_feed_etag=None,
+    cache_hooks: CacheHooks,
 ) -> tuple[list[RawFeedEntry], FeedHealthReport]:
-    """Fetch and parse a single RSS feed.
-
-    Sends conditional request headers (ETag / Last-Modified) when available.
-    On 304 Not Modified, returns UNCHANGED status with no entries. On success,
-    stores the new ETag and Last-Modified values for the next request.
-
-    Parameters
-    ----------
-    config : FeedConfig
-        Feed configuration for this fetch.
-    client : httpx.AsyncClient
-        Shared async HTTP client.
-    run_id : str
-        Pipeline run identifier for log correlation.
-    get_feed_etag : callable, optional
-        Cache lookup: (feed_id) -> (etag, last_modified) | None.
-    store_feed_etag : callable, optional
-        Cache write: (feed_id, etag, last_modified) -> None.
-
-    Returns
-    -------
-    tuple[list[RawFeedEntry], FeedHealthReport]
-        Parsed entries and a health report. On any failure, entries list
-        is empty and the health report describes the failure.
-    """
-    fetched_at = datetime.now(timezone.utc)
-
-    # Build conditional request headers from cached ETag / Last-Modified
-    conditional_headers: dict[str, str] = {}
-    if get_feed_etag is not None:
-        cached = get_feed_etag(config.id)
-        if cached:
-            etag, last_modified = cached
-            if etag:
-                conditional_headers["If-None-Match"] = etag
-            if last_modified:
-                conditional_headers["If-Modified-Since"] = last_modified
-
-    # Step 1: Fetch raw feed content
-    try:
-        response = await client.get(config.url, headers=conditional_headers)
-
-        # 304 Not Modified — feed unchanged, skip processing
-        if response.status_code == 304:
-            return [], FeedHealthReport(
-                feed_id=config.id,
-                feed_name=config.name,
-                feed_url=config.url,
-                status=FeedStatus.UNCHANGED,
-                entries_fetched=0,
-                fetched_at=fetched_at,
-                etag_supported=True,
-            )
-
-        response.raise_for_status()
-        raw_content = response.text
-        response_etag = response.headers.get("etag")
-        response_last_modified = response.headers.get("last-modified")
-        etag_supported = bool(response_etag or response_last_modified)
-
-    except httpx.TimeoutException:
-        return [], FeedHealthReport(
-            feed_id=config.id,
-            feed_name=config.name,
-            feed_url=config.url,
-            status=FeedStatus.UNREACHABLE,
-            error_message="Request timed out",
-            fetched_at=fetched_at,
-        )
-    except httpx.HTTPStatusError as e:
-        return [], FeedHealthReport(
-            feed_id=config.id,
-            feed_name=config.name,
-            feed_url=config.url,
-            status=FeedStatus.UNREACHABLE,
-            error_message=f"HTTP {e.response.status_code}",
-            fetched_at=fetched_at,
-        )
-    except httpx.RequestError as e:
-        return [], FeedHealthReport(
-            feed_id=config.id,
-            feed_name=config.name,
-            feed_url=config.url,
-            status=FeedStatus.UNREACHABLE,
-            error_message=str(e),
-            fetched_at=fetched_at,
-        )
-
-    # Step 2: Persist new ETag / Last-Modified for next request
-    if store_feed_etag is not None and (response_etag or response_last_modified):
-        store_feed_etag(config.id, response_etag, response_last_modified)
-
-    # Step 3: Parse RSS/Atom content
-    parsed = feedparser.parse(raw_content)
-
-    if parsed.bozo and not parsed.entries:
-        bozo_reason = str(getattr(parsed, "bozo_exception", "unknown parse error"))
-        return [], FeedHealthReport(
-            feed_id=config.id,
-            feed_name=config.name,
-            feed_url=config.url,
-            status=FeedStatus.MALFORMED,
-            error_message=f"Feed parse error: {bozo_reason}",
-            fetched_at=fetched_at,
-            etag_supported=etag_supported,
-        )
-
-    if not parsed.entries:
-        return [], FeedHealthReport(
-            feed_id=config.id,
-            feed_name=config.name,
-            feed_url=config.url,
-            status=FeedStatus.EMPTY,
-            entries_fetched=0,
-            error_message="Feed returned no entries",
-            fetched_at=fetched_at,
-            etag_supported=etag_supported,
-        )
-
-    # Step 4: Convert parsed entries to RawFeedEntry models
-    entries = [
-        _parse_entry(entry, config, fetched_at, run_id) for entry in parsed.entries
-    ]
-
-    status = (
-        FeedStatus.OK if len(entries) >= _MIN_EXPECTED_ENTRIES else FeedStatus.STALE
-    )
-
-    return entries, FeedHealthReport(
-        feed_id=config.id,
-        feed_name=config.name,
-        feed_url=config.url,
-        status=status,
-        entries_fetched=len(entries),
-        fetched_at=fetched_at,
-        feed_last_modified=response_last_modified,
-        etag=response_etag,
-        etag_supported=etag_supported,
-    )
-
-
-def _parse_entry(
-    entry: feedparser.FeedParserDict,
-    config: FeedConfig,
-    fetched_at: datetime,
-    run_id: str,
-) -> RawFeedEntry:
-    """Convert a feedparser entry dict to a RawFeedEntry model.
-
-    All fields default to None for missing data. Dates are preserved as raw
-    strings. URLs are not validated. Whether this is an event is not judged.
-    That is downstream work.
-
-    Parameters
-    ----------
-    entry : feedparser.FeedParserDict
-        Parsed entry dict from feedparser.
-    config : FeedConfig
-        Source feed configuration.
-    fetched_at : datetime
-        UTC timestamp of the fetch.
-    run_id : str
-        Pipeline run identifier.
-
-    Returns
-    -------
-    RawFeedEntry
-        Faithful representation of the feed entry.
-    """
-    categories = [
-        tag.get("term", "") for tag in entry.get("tags", []) if tag.get("term")
-    ]
-
-    description = None
-    if entry.get("content"):
-        description = entry["content"][0].get("value")
-    if not description:
-        description = entry.get("summary")
-
-    enclosure_url: Optional[str] = None
-    enclosures = entry.get("enclosures", [])
-    if enclosures:
-        enclosure_url = enclosures[0].get("url")
-
-    return RawFeedEntry(
-        feed_id=config.id,
-        feed_name=config.name,
-        source_url=config.url,
-        run_id=run_id,
-        title=entry.get("title"),
-        link=entry.get("link"),
-        description=description,
-        published_raw=entry.get("published"),
-        author=entry.get("author"),
-        categories=categories,
-        enclosure_url=enclosure_url,
-        fetched_at=fetched_at,
-    )
+    """Dispatch a single source fetch to the adapter for its ``source_type``."""
+    adapter = get_adapter(config.source_type)
+    return await adapter.fetch(config, run_id, cache_hooks)
 
 
 def _log_summary(run_id: str, reports: list[FeedHealthReport]) -> None:
-    """Log a summary of feed health across the full run.
-
-    Parameters
-    ----------
-    run_id : str
-        Pipeline run identifier for log correlation.
-    reports : list[FeedHealthReport]
-        Health reports for all feeds processed in this run.
-    """
+    """Log a summary of feed health across the full run."""
     total = len(reports)
     succeeded = sum(1 for r in reports if r.succeeded)
     unchanged = sum(1 for r in reports if r.skipped)

@@ -15,9 +15,11 @@ FeedStatus
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, field_validator
+
+SourceType = Literal["rss", "ical", "api", "scrape"]
 
 
 class FeedStatus(str, Enum):
@@ -49,7 +51,7 @@ class FeedStatus(str, Enum):
 
 
 class FeedConfig(BaseModel):
-    """A configured RSS feed source as defined in feeds.yaml.
+    """A configured event source as defined in feeds.yaml.
 
     Parameters
     ----------
@@ -58,7 +60,7 @@ class FeedConfig(BaseModel):
     name : str
         Human-readable feed name for logging and UI display.
     url : str
-        RSS feed URL.
+        Source URL (RSS feed, ICS calendar, API endpoint, or scrape target).
     city : str
         City this feed covers. Used for location context.
     source_quality_score : float
@@ -68,6 +70,8 @@ class FeedConfig(BaseModel):
         Whether this feed is included in pipeline runs. Default True.
     notes : str, optional
         Operator notes about this feed's content and characteristics.
+    source_type : SourceType
+        Ingestion adapter to use. Defaults to ``"rss"`` for backward compatibility.
     cursor : str, optional
         Always None for RSS feeds. Reserved for cursor-based pagination APIs
         (e.g. Eventbrite, Meetup) that may be added as future sources.
@@ -82,6 +86,7 @@ class FeedConfig(BaseModel):
     source_quality_score: float
     active: bool = True
     notes: Optional[str] = None
+    source_type: SourceType = "rss"
     cursor: Optional[str] = None
 
     @field_validator("source_quality_score")
