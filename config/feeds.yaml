@@ -35,20 +35,44 @@ feeds:
     notes: "PENDING: Feed URL returns 404 HTML (category page exists but /feed/ is dead)."
 
   - id: dance_nyc
-    name: Dance/NYC RSS builder
-    url: https://www.dance.nyc/rss/
+    name: Dance/NYC Community Calendar
+    url: https://www.dance.nyc/calendar/
     city: New York
     source_quality_score: 0.75
+    source_type: scrape
     active: false
-    notes: "PENDING: URL is an RSS builder page, not a feed endpoint."
+    scrape:
+      strategy: css
+      item_selector: div.event
+      title_selector: h3
+      link_selector: a
+      description_selector: p
+      date_selector: div.event_time
+    notes: >
+      HTML-only community calendar (CSS scrape). Enable when selectors are
+      verified against live markup; prefer json_api/json_embed if XHR endpoints
+      are discovered.
 
   - id: ohmyrockness_nyc
     name: Oh My Rockness NYC
-    url: https://www.ohmyrockness.com/
+    url: https://www.ohmyrockness.com/shows
     city: New York
     source_quality_score: 0.85
-    active: false
-    notes: "PENDING: Homepage is HTML, not RSS. Site exposes features.atom only."
+    source_type: scrape
+    active: true
+    scrape:
+      strategy: json_api
+      discover_json_url: true
+      require_csrf: true
+      json_items_path: shows
+      field_map:
+        title: bands
+        link: url
+        published_raw: starts_at
+        description: venue.name
+    notes: >
+      Uses Oh My Rockness embedded XHR endpoint (/api/shows.json) discovered from
+      the shows page. CSRF token required.
 
   - id: nypl_events
     name: NYPL Events

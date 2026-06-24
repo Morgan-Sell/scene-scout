@@ -403,7 +403,7 @@ async def test_ical_source_type_returns_entries():
 
 
 @respx.mock
-async def test_unimplemented_source_type_returns_health_report_without_entries():
+async def test_scrape_without_config_returns_health_report():
     config = FeedConfig(
         id="scrape_test",
         name="HTML Calendar",
@@ -418,7 +418,7 @@ async def test_unimplemented_source_type_returns_health_report_without_entries()
     assert entries == []
     assert len(reports) == 1
     assert reports[0].status == FeedStatus.UNREACHABLE
-    assert "scrape" in reports[0].error_message.lower()
+    assert "scrape configuration is required" in reports[0].error_message.lower()
     assert reports[0].feed_id == "scrape_test"
 
 
