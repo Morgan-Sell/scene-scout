@@ -20,6 +20,23 @@ from typing import Literal, Optional
 from pydantic import BaseModel, field_validator
 
 SourceType = Literal["rss", "ical", "api", "scrape"]
+ScrapeStrategy = Literal["json_api", "css", "json_embed"]
+
+
+class ScrapeConfig(BaseModel):
+    """Per-site HTML calendar scrape configuration."""
+
+    strategy: ScrapeStrategy = "css"
+    json_url: Optional[str] = None
+    discover_json_url: bool = False
+    json_items_path: Optional[str] = None
+    require_csrf: bool = False
+    item_selector: Optional[str] = None
+    title_selector: Optional[str] = "h3"
+    link_selector: Optional[str] = "a"
+    description_selector: Optional[str] = None
+    date_selector: Optional[str] = None
+    field_map: dict[str, str] = {}
 
 
 class FeedStatus(str, Enum):
@@ -77,6 +94,9 @@ class FeedConfig(BaseModel):
         (e.g. Eventbrite, Meetup) that may be added as future sources.
         Allows the Feed Scout abstraction to accommodate non-RSS sources
         without a schema change.
+    scrape : ScrapeConfig, optional
+        Per-site selector or JSON API configuration when ``source_type`` is
+        ``"scrape"``.
     """
 
     id: str
@@ -88,6 +108,7 @@ class FeedConfig(BaseModel):
     notes: Optional[str] = None
     source_type: SourceType = "rss"
     cursor: Optional[str] = None
+    scrape: Optional[ScrapeConfig] = None
 
     @field_validator("source_quality_score")
     @classmethod

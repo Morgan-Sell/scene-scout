@@ -1,0 +1,28 @@
+{
+  "shows": [
+    {
+      "id": 101,
+      "url": "/shows/2026/6/24/the-breeders-brooklyn-paramount",
+      "starts_at": "2026-06-24T20:00:00-04:00",
+      "bands": [
+        {"name": "The Breeders", "slug": "the-breeders"}
+      ],
+      "venue": {
+        "name": "Brooklyn Paramount",
+        "full_address": "385 Flatbush Ave, Brooklyn, NY"
+      }
+    },
+    {
+      "id": 102,
+      "url": "/shows/2026/6/25/tortoise-webster-hall",
+      "starts_at": "2026-06-25T19:30:00-04:00",
+      "bands": [
+        {"name": "Tortoise", "slug": "tortoise"}
+      ],
+      "venue": {
+        "name": "Webster Hall",
+        "full_address": "125 E 11th St, New York, NY"
+      }
+    }
+  ]
+}
