@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from scene_scout.cli import (
-    build_parser,
     build_feed_probe_payload,
+    build_parser,
     feed_probe_output_path,
     feed_probe_run_id,
     main,

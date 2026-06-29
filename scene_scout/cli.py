@@ -124,11 +124,14 @@ def print_feed_probe_summary(
             report.error_message or "—",
         )
 
+    unchanged_count = sum(
+        1 for report in reports if report.status == FeedStatus.UNCHANGED
+    )
     _CONSOLE.print(feed_table)
     _CONSOLE.print(
         f"\nFeeds: {len(reports)}  "
         f"Raw entries: {raw_entries}  "
-        f"UNCHANGED (304): {sum(1 for r in reports if r.status == FeedStatus.UNCHANGED)}"
+        f"UNCHANGED (304): {unchanged_count}"
     )
     _CONSOLE.print(f"Report: [green]{output_path}[/green]")
 
