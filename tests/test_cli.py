@@ -15,10 +15,10 @@ from scene_scout.cli import (
     print_uat_summary,
     run_uat,
     uat_output_dir,
-    write_summary_json,
 )
 from scene_scout.logging.logger import _logger_cache
-from scene_scout.orchestrator import PipelineResult
+from scene_scout.orchestrator import PipelineResult, PipelineRunError
+from scene_scout.uat_artifacts import write_summary_json
 from tests.conftest import TEST_RUN_ID
 
 SANDLOT_PROMPT = (
@@ -87,6 +87,7 @@ def test_write_summary_json_writes_pipeline_counts(tmp_path: Path) -> None:
     assert summary_path.exists()
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["run_id"] == TEST_RUN_ID
+    assert summary["status"] == "completed"
     assert summary["raw_entries"] == 10
     assert summary["feeds_fetched"] == 3
     assert summary["feeds_unchanged"] == 1
@@ -143,6 +144,7 @@ async def test_run_uat_creates_output_directory_and_summary(
     assert run_dir.is_dir()
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["run_id"] == TEST_RUN_ID
+    assert summary["status"] == "completed"
     assert summary["raw_entries"] == 0
     assert summary["seen_entries_cache_hits"] == 0
 
@@ -186,6 +188,44 @@ async def test_run_uat_verbose_enables_debug_logging(
     configure_mock.assert_called_once_with(logging.DEBUG)
 
 
+@pytest.mark.asyncio
+async def test_run_uat_writes_failure_artifacts_on_pipeline_error(
+    output_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    partial = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt=SANDLOT_PROMPT,
+        raw_entries=12,
+        extraction_candidates=8,
+        normalized_events=3,
+        last_completed_stage="normalization",
+    )
+
+    async def _raise_pipeline_error(prompt: str, *, uat_output_base=None):
+        raise PipelineRunError(partial, ValueError("zip() argument 2 is shorter"))
+
+    monkeypatch.setattr(
+        "scene_scout.cli.Orchestrator",
+        lambda: AsyncMock(run=_raise_pipeline_error),
+    )
+
+    with pytest.raises(PipelineRunError):
+        await run_uat(SANDLOT_PROMPT)
+
+    run_dir = output_dir / f"uat_{TEST_RUN_ID}"
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    error = json.loads((run_dir / "error.json").read_text(encoding="utf-8"))
+
+    assert summary["status"] == "failed"
+    assert summary["raw_entries"] == 12
+    assert summary["normalized_events"] == 3
+    assert summary["last_completed_stage"] == "normalization"
+    assert error["exception_type"] == "ValueError"
+    assert "zip()" in error["message"]
+    assert error["last_completed_stage"] == "normalization"
+
+
 def test_main_uat_command_exits_zero(
     output_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -200,6 +240,32 @@ def test_main_uat_command_exits_zero(
 
     assert exit_code == 0
     assert (output_dir / f"uat_{TEST_RUN_ID}" / "summary.json").exists()
+
+
+def test_main_uat_command_exits_one_on_pipeline_failure(
+    output_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    partial = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt="test",
+        last_completed_stage="feed_scout",
+    )
+
+    async def _raise_pipeline_error(prompt: str, *, uat_output_base=None):
+        raise PipelineRunError(partial, RuntimeError("boom"))
+
+    monkeypatch.setattr(
+        "scene_scout.cli.Orchestrator",
+        lambda: AsyncMock(run=_raise_pipeline_error),
+    )
+
+    exit_code = main(["uat", "--prompt", "test"])
+
+    assert exit_code == 1
+    run_dir = output_dir / f"uat_{TEST_RUN_ID}"
+    assert (run_dir / "summary.json").exists()
+    assert (run_dir / "error.json").exists()
 
 
 def test_uat_output_dir_path() -> None:
