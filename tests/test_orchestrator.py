@@ -34,6 +34,7 @@ from scene_scout.orchestrator import (
     PreEnrichmentFilterResult,
     _batch_custom_id,
     _batch_results_for_agent,
+    _cap_extraction_entries,
     _partition_entries_by_seen_cache,
     _poll_enrichment_batch,
     _resolve_user_profile,
@@ -45,6 +46,7 @@ from scene_scout.orchestrator import (
     read_pipeline_state,
     write_pipeline_state,
 )
+from scene_scout.orchestrator_config import UatRunOptions
 from scene_scout.services.batch import BatchRequest, BatchResultItem, BatchResults
 from scene_scout.services.cache import CacheService
 from tests.conftest import TEST_RUN_ID
@@ -959,3 +961,82 @@ async def test_orchestrator_calls_email_composer_and_records_preview(
     email_mock.assert_awaited_once()
     assert result.email_preview_path == "output/uat_test/email_preview.html"
     assert result.email_sent is False
+
+
+def test_cap_extraction_entries_returns_all_when_under_cap() -> None:
+    entries = [_raw_entry(link=f"https://example.com/{index}") for index in range(3)]
+    capped = _cap_extraction_entries(entries, 25, get_logger("test"))
+    assert capped == entries
+
+
+def test_cap_extraction_entries_truncates_to_cap() -> None:
+    entries = [_raw_entry(link=f"https://example.com/{index}") for index in range(5)]
+    capped = _cap_extraction_entries(entries, 2, get_logger("test"))
+    assert len(capped) == 2
+    assert capped == entries[:2]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_stop_after_feeds_skips_extraction(
+    pipeline_state_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_entry = _raw_entry()
+    mock_extraction = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.feed_scout.run",
+        AsyncMock(return_value=([source_entry], [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_extraction.run",
+        mock_extraction,
+    )
+
+    result = await Orchestrator().run(
+        SANDLOT_PROMPT,
+        uat_options=UatRunOptions(stop_after="feeds"),
+    )
+
+    mock_extraction.assert_not_awaited()
+    assert result.raw_entries == 1
+    assert result.extraction_candidates == 0
+    assert result.last_completed_stage == "feeds"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_max_extraction_caps_cache_miss_entries(
+    pipeline_state_dir: Path,
+    cache_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = CacheService(run_id=TEST_RUN_ID, db_path=cache_db)
+    entries = [
+        _raw_entry(
+            link=f"https://example.com/event-{index}",
+            title=f"Event {index}",
+        )
+        for index in range(5)
+    ]
+    mock_extraction = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.feed_scout.run",
+        AsyncMock(return_value=(entries, [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_extraction.run",
+        mock_extraction,
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.CacheService",
+        lambda run_id, db_path=None: cache,
+    )
+
+    await Orchestrator().run(
+        SANDLOT_PROMPT,
+        uat_options=UatRunOptions(max_extraction=2, stop_after="extract"),
+    )
+
+    mock_extraction.assert_awaited_once()
+    passed_entries = mock_extraction.await_args.args[0]
+    assert len(passed_entries) == 2
+    assert passed_entries == entries[:2]

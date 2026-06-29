@@ -13,6 +13,7 @@ import pytest
 from scene_scout.cli import (
     build_feed_probe_payload,
     build_parser,
+    build_uat_run_options,
     feed_probe_output_path,
     feed_probe_run_id,
     main,
@@ -20,10 +21,12 @@ from scene_scout.cli import (
     run_feed_probe,
     run_uat,
     uat_output_dir,
+    uat_summary_status,
 )
 from scene_scout.logging.logger import _logger_cache
 from scene_scout.models.feed import FeedHealthReport, FeedStatus
 from scene_scout.orchestrator import PipelineResult, PipelineRunError
+from scene_scout.orchestrator_config import UatRunOptions
 from scene_scout.uat_artifacts import write_summary_json
 from tests.conftest import TEST_RUN_ID
 
@@ -81,6 +84,59 @@ def test_build_parser_uat_subcommand() -> None:
     assert args.verbose is True
 
 
+def test_build_parser_uat_abbreviated_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "uat",
+            "--prompt",
+            SANDLOT_PROMPT,
+            "--dry-run",
+            "--max-extraction",
+            "25",
+            "--feeds",
+            "brooklynvegan,theskint",
+            "--stop-after",
+            "extract",
+        ]
+    )
+
+    assert args.max_extraction == 25
+    assert args.feeds == "brooklynvegan,theskint"
+    assert args.stop_after == "extract"
+
+
+def test_build_uat_run_options_resolves_env_max_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UAT_MAX_EXTRACTION", "15")
+    options = build_uat_run_options(feeds="a,b")
+    assert options.max_extraction == 15
+    assert options.feed_ids == frozenset({"a", "b"})
+
+
+def test_uat_summary_status_completed_only_on_full_run() -> None:
+    assert (
+        uat_summary_status(
+            PipelineResult(
+                run_id=TEST_RUN_ID,
+                user_prompt=SANDLOT_PROMPT,
+                last_completed_stage="complete",
+            )
+        )
+        == "completed"
+    )
+    assert (
+        uat_summary_status(
+            PipelineResult(
+                run_id=TEST_RUN_ID,
+                user_prompt=SANDLOT_PROMPT,
+                last_completed_stage="feeds",
+            )
+        )
+        == "partial"
+    )
+
+
 def test_build_parser_feed_probe_subcommand() -> None:
     args = build_parser().parse_args(["feed-probe", "--allow-failures", "--verbose"])
 
@@ -116,6 +172,37 @@ def test_build_feed_probe_payload_marks_all_ok_when_feeds_healthy() -> None:
     assert payload["raw_entries"] == 12
     assert payload["all_ok"] is True
     assert payload["feed_health"][1]["status"] == "unchanged"
+
+
+def test_build_feed_probe_payload_all_ok_false_when_no_feeds() -> None:
+    payload = build_feed_probe_payload(PROBE_RUN_ID, [], [])
+
+    assert payload["feeds_fetched"] == 0
+    assert payload["raw_entries"] == 0
+    assert payload["all_ok"] is False
+    assert payload["feed_health"] == []
+
+
+@pytest.mark.asyncio
+async def test_run_feed_probe_returns_nonzero_when_no_active_feeds(
+    output_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("scene_scout.cli.load_feed_configs", lambda: [])
+    monkeypatch.setattr(
+        "scene_scout.cli.feed_scout.run",
+        AsyncMock(return_value=([], [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.cli.CacheService",
+        lambda run_id, db_path=None: _mock_cache_service(),
+    )
+
+    result = await run_feed_probe(now=PROBE_NOW)
+
+    assert result.exit_code == 1
+    assert result.payload["all_ok"] is False
+    assert result.payload["feeds_fetched"] == 0
 
 
 @pytest.mark.asyncio
@@ -310,7 +397,11 @@ async def test_run_uat_creates_output_directory_and_summary(
     output_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mock_result = PipelineResult(run_id=TEST_RUN_ID, user_prompt=SANDLOT_PROMPT)
+    mock_result = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt=SANDLOT_PROMPT,
+        last_completed_stage="complete",
+    )
     monkeypatch.setattr(
         "scene_scout.cli.Orchestrator",
         lambda: AsyncMock(run=AsyncMock(return_value=mock_result)),
@@ -334,7 +425,11 @@ async def test_run_uat_dry_run_sets_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("DRY_RUN", raising=False)
-    mock_result = PipelineResult(run_id=TEST_RUN_ID, user_prompt=SANDLOT_PROMPT)
+    mock_result = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt=SANDLOT_PROMPT,
+        last_completed_stage="complete",
+    )
     monkeypatch.setattr(
         "scene_scout.cli.Orchestrator",
         lambda: AsyncMock(run=AsyncMock(return_value=mock_result)),
@@ -348,13 +443,83 @@ async def test_run_uat_dry_run_sets_environment(
 
 
 @pytest.mark.asyncio
+async def test_run_uat_writes_partial_summary_on_early_stop(
+    output_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    partial = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt=SANDLOT_PROMPT,
+        raw_entries=42,
+        last_completed_stage="feeds",
+    )
+    run_mock = AsyncMock(return_value=partial)
+    monkeypatch.setattr(
+        "scene_scout.cli.Orchestrator",
+        lambda: AsyncMock(run=run_mock),
+    )
+
+    await run_uat(
+        SANDLOT_PROMPT,
+        dry_run=True,
+        feeds="brooklynvegan,theskint",
+        stop_after="feeds",
+    )
+
+    run_mock.assert_awaited_once()
+    _, kwargs = run_mock.await_args
+    assert kwargs["uat_options"] == UatRunOptions(
+        feed_ids=frozenset({"brooklynvegan", "theskint"}),
+        stop_after="feeds",
+    )
+
+    summary = json.loads(
+        (output_dir / f"uat_{TEST_RUN_ID}" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["status"] == "partial"
+    assert summary["last_completed_stage"] == "feeds"
+    assert summary["raw_entries"] == 42
+
+
+@pytest.mark.asyncio
+async def test_run_uat_passes_max_extraction_to_orchestrator(
+    output_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_result = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt=SANDLOT_PROMPT,
+        last_completed_stage="complete",
+    )
+    run_mock = AsyncMock(return_value=mock_result)
+    monkeypatch.setattr(
+        "scene_scout.cli.Orchestrator",
+        lambda: AsyncMock(run=run_mock),
+    )
+
+    await run_uat(SANDLOT_PROMPT, max_extraction=25)
+
+    _, kwargs = run_mock.await_args
+    assert kwargs["uat_options"].max_extraction == 25
+
+
+def test_main_uat_rejects_invalid_max_extraction() -> None:
+    exit_code = main(["uat", "--prompt", "test", "--max-extraction", "0"])
+    assert exit_code == 1
+
+
+@pytest.mark.asyncio
 async def test_run_uat_verbose_enables_debug_logging(
     output_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import MagicMock
 
-    mock_result = PipelineResult(run_id=TEST_RUN_ID, user_prompt=SANDLOT_PROMPT)
+    mock_result = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt=SANDLOT_PROMPT,
+        last_completed_stage="complete",
+    )
     monkeypatch.setattr(
         "scene_scout.cli.Orchestrator",
         lambda: AsyncMock(run=AsyncMock(return_value=mock_result)),
@@ -381,7 +546,7 @@ async def test_run_uat_writes_failure_artifacts_on_pipeline_error(
         last_completed_stage="normalization",
     )
 
-    async def _raise_pipeline_error(prompt: str, *, uat_output_base=None):
+    async def _raise_pipeline_error(prompt: str, *, uat_output_base=None, **kwargs):
         raise PipelineRunError(partial, ValueError("zip() argument 2 is shorter"))
 
     monkeypatch.setattr(
@@ -409,7 +574,11 @@ def test_main_uat_command_exits_zero(
     output_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mock_result = PipelineResult(run_id=TEST_RUN_ID, user_prompt="test")
+    mock_result = PipelineResult(
+        run_id=TEST_RUN_ID,
+        user_prompt="test",
+        last_completed_stage="complete",
+    )
     monkeypatch.setattr(
         "scene_scout.cli.Orchestrator",
         lambda: AsyncMock(run=AsyncMock(return_value=mock_result)),
@@ -431,7 +600,7 @@ def test_main_uat_command_exits_one_on_pipeline_failure(
         last_completed_stage="feed_scout",
     )
 
-    async def _raise_pipeline_error(prompt: str, *, uat_output_base=None):
+    async def _raise_pipeline_error(prompt: str, *, uat_output_base=None, **kwargs):
         raise PipelineRunError(partial, RuntimeError("boom"))
 
     monkeypatch.setattr(

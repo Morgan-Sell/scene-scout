@@ -9,7 +9,7 @@ from typing import Any, Literal
 from scene_scout.config import is_dry_run
 from scene_scout.orchestrator import PipelineResult
 
-UATStatus = Literal["completed", "failed"]
+UATStatus = Literal["completed", "failed", "partial"]
 
 
 def build_summary_payload(

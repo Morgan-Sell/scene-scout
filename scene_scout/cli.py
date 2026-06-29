@@ -27,8 +27,13 @@ from scene_scout.email_composer_config import EMAIL_PREVIEW_FILENAME
 from scene_scout.logging import configure_log_level, get_logger
 from scene_scout.models.feed import FeedHealthReport, FeedStatus
 from scene_scout.orchestrator import Orchestrator, PipelineResult, PipelineRunError
+from scene_scout.orchestrator_config import (
+    UatRunOptions,
+    parse_feed_ids,
+    resolve_uat_max_extraction,
+)
 from scene_scout.services.cache import CacheService
-from scene_scout.uat_artifacts import write_error_json, write_summary_json
+from scene_scout.uat_artifacts import UATStatus, write_error_json, write_summary_json
 
 _OUTPUT_DIR = PROJECT_ROOT / "output"
 _CONSOLE = Console()
@@ -88,7 +93,7 @@ def build_feed_probe_payload(
     feeds_unchanged = sum(
         1 for report in reports if report.status == FeedStatus.UNCHANGED
     )
-    all_ok = all(feed_probe_is_healthy(report) for report in reports)
+    all_ok = bool(reports) and all(feed_probe_is_healthy(report) for report in reports)
     return {
         "run_id": run_id,
         "feeds_fetched": len(reports),
@@ -318,8 +323,35 @@ def print_uat_summary(result: PipelineResult) -> None:
             _CONSOLE.print(f"\nEmail preview: [green]{preview_path}[/green]")
 
 
+def build_uat_run_options(
+    *,
+    max_extraction: int | None = None,
+    feeds: str | None = None,
+    stop_after: str | None = None,
+) -> UatRunOptions:
+    """Build orchestrator UAT limits from CLI flags and env."""
+    return UatRunOptions(
+        feed_ids=parse_feed_ids(feeds),
+        max_extraction=resolve_uat_max_extraction(max_extraction),
+        stop_after=stop_after,  # type: ignore[arg-type]
+    )
+
+
+def uat_summary_status(result: PipelineResult) -> UATStatus:
+    """Map pipeline outcome to summary JSON status."""
+    if result.last_completed_stage == "complete":
+        return "completed"
+    return "partial"
+
+
 async def run_uat(
-    prompt: str, *, dry_run: bool = False, verbose: bool = False
+    prompt: str,
+    *,
+    dry_run: bool = False,
+    verbose: bool = False,
+    max_extraction: int | None = None,
+    feeds: str | None = None,
+    stop_after: str | None = None,
 ) -> PipelineResult:
     """Execute a UAT pipeline run.
 
@@ -331,6 +363,12 @@ async def run_uat(
         When ``True``, sets ``DRY_RUN=true`` so email is not sent.
     verbose : bool
         When ``True``, enables DEBUG-level agent logs.
+    max_extraction : int | None
+        Cap cache-miss entries sent to extraction (``UAT_MAX_EXTRACTION`` env fallback).
+    feeds : str | None
+        Comma-separated active feed ids to include.
+    stop_after : str | None
+        Stop after ``feeds``, ``extract``, ``normalize``, ``enrich``, or ``email``.
 
     Returns
     -------
@@ -343,14 +381,30 @@ async def run_uat(
     if verbose:
         configure_log_level(logging.DEBUG)
 
+    uat_options = build_uat_run_options(
+        max_extraction=max_extraction,
+        feeds=feeds,
+        stop_after=stop_after,
+    )
+
     logger = get_logger("orchestrator")
     logger.info(
         "UAT run starting",
-        data={"dry_run": is_dry_run(), "verbose": verbose},
+        data={
+            "dry_run": is_dry_run(),
+            "verbose": verbose,
+            "feeds": sorted(uat_options.feed_ids) if uat_options.feed_ids else None,
+            "max_extraction": uat_options.max_extraction,
+            "stop_after": uat_options.stop_after,
+        },
     )
 
     try:
-        result = await Orchestrator().run(prompt, uat_output_base=_OUTPUT_DIR)
+        result = await Orchestrator().run(
+            prompt,
+            uat_output_base=_OUTPUT_DIR,
+            uat_options=uat_options,
+        )
     except PipelineRunError as exc:
         result = exc.result
         output_dir = uat_output_dir(result.run_id)
@@ -370,7 +424,7 @@ async def run_uat(
         raise
 
     output_dir = uat_output_dir(result.run_id)
-    write_summary_json(output_dir, result, status="completed")
+    write_summary_json(output_dir, result, status=uat_summary_status(result))
     print_uat_summary(result)
 
     logger = get_logger("orchestrator", run_id=result.run_id)
@@ -421,6 +475,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable DEBUG-level agent logs",
     )
+    uat_parser.add_argument(
+        "--max-extraction",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Cap cache-miss entries sent to extraction "
+            "(UAT_MAX_EXTRACTION env fallback)"
+        ),
+    )
+    uat_parser.add_argument(
+        "--feeds",
+        default=None,
+        help="Comma-separated active feed ids (default: all active feeds)",
+    )
+    uat_parser.add_argument(
+        "--stop-after",
+        choices=["feeds", "extract", "normalize", "enrich", "email"],
+        default=None,
+        help="Stop after the given pipeline stage and write a partial summary",
+    )
 
     feed_probe_parser = subparsers.add_parser(
         "feed-probe",
@@ -463,9 +538,15 @@ def main(argv: list[str] | None = None) -> int:
                     args.prompt,
                     dry_run=args.dry_run,
                     verbose=args.verbose,
+                    max_extraction=args.max_extraction,
+                    feeds=args.feeds,
+                    stop_after=args.stop_after,
                 )
             )
         except PipelineRunError:
+            return 1
+        except ValueError as exc:
+            _CONSOLE.print(f"[red]UAT configuration error:[/red] {exc}")
             return 1
         return 0
 

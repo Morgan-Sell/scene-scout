@@ -46,7 +46,11 @@ from scene_scout.models.event import NormalizedEvent
 from scene_scout.models.feed import FeedStatus, RawFeedEntry
 from scene_scout.models.ranking import RankedEvent
 from scene_scout.models.user import UserProfile
-from scene_scout.orchestrator_config import ENRICHMENT_BATCH_POLL_INTERVAL_SECONDS
+from scene_scout.orchestrator_config import (
+    ENRICHMENT_BATCH_POLL_INTERVAL_SECONDS,
+    UatRunOptions,
+    select_feed_configs,
+)
 from scene_scout.pre_enrichment_filter_config import (
     PRE_ENRICHMENT_COMING_WEEK_DAYS,
     PRE_ENRICHMENT_HARD_EXCLUDE_DAYS,
@@ -812,6 +816,28 @@ def _write_uat_stage_checkpoint(
     write_uat_checkpoint(uat_dir, result, stage)
 
 
+def _cap_extraction_entries(
+    entries: list[RawFeedEntry],
+    max_extraction: int | None,
+    logger: Any,
+) -> list[RawFeedEntry]:
+    """Limit cache-miss entries sent to the Extraction Agent."""
+    if max_extraction is None or len(entries) <= max_extraction:
+        return entries
+    logger.info(
+        "Capping extraction entries",
+        data={"before": len(entries), "cap": max_extraction},
+    )
+    return entries[:max_extraction]
+
+
+def _should_stop_after(
+    stop_after: str | None,
+    stage: str,
+) -> bool:
+    return stop_after == stage
+
+
 class Orchestrator:
     """Sequences the SceneScout pipeline from feed fetch through email send."""
 
@@ -820,6 +846,7 @@ class Orchestrator:
         prompt: str,
         *,
         uat_output_base: Path | None = None,
+        uat_options: UatRunOptions | None = None,
     ) -> PipelineResult:
         """Execute the full pipeline skeleton for a user prompt.
 
@@ -833,6 +860,8 @@ class Orchestrator:
         uat_output_base : Path | None, optional
             When set (UAT CLI), writes ``checkpoint.json`` under
             ``{uat_output_base}/uat_{run_id}/`` after major early stages.
+        uat_options : UatRunOptions | None, optional
+            Abbreviated UAT limits (feed subset, extraction cap, early stop).
 
         Returns
         -------
@@ -850,6 +879,7 @@ class Orchestrator:
         result = PipelineResult(run_id=run_id, user_prompt=prompt)
         state = PipelineState(run_id=run_id)
         uat_dir = _uat_run_dir(uat_output_base, run_id)
+        options = uat_options or UatRunOptions()
 
         logger.info("Pipeline started", data={"user_prompt_length": len(prompt)})
 
@@ -861,6 +891,7 @@ class Orchestrator:
                 result=result,
                 state=state,
                 uat_dir=uat_dir,
+                uat_options=options,
             )
         except Exception as exc:
             raise PipelineRunError(result, exc) from exc
@@ -874,13 +905,14 @@ class Orchestrator:
         result: PipelineResult,
         state: PipelineState,
         uat_dir: Path | None,
+        uat_options: UatRunOptions,
     ) -> PipelineResult:
         run_migrations()
 
         profile = await _resolve_user_profile(prompt, run_id)
 
         cache = CacheService(run_id=run_id)
-        feed_configs = load_feed_configs()
+        feed_configs = select_feed_configs(load_feed_configs(), uat_options.feed_ids)
         entries, feed_reports = await feed_scout.run(
             feed_configs,
             run_id,
@@ -904,12 +936,21 @@ class Orchestrator:
         )
         _write_uat_stage_checkpoint(uat_dir, result, "feed_scout")
 
+        if _should_stop_after(uat_options.stop_after, "feeds"):
+            result.last_completed_stage = "feeds"
+            return result
+
         (
             cached_events,
             entries_for_extraction,
             cache_hits,
             cache_misses,
         ) = _partition_entries_by_seen_cache(entries, cache, logger)
+        entries_for_extraction = _cap_extraction_entries(
+            entries_for_extraction,
+            uat_options.max_extraction,
+            logger,
+        )
         result.seen_entries_cache_hits = cache_hits
         result.seen_entries_cache_misses = cache_misses
         result.seen_entries_hit_rate_pct = _seen_entries_hit_rate_pct(
@@ -924,6 +965,10 @@ class Orchestrator:
         result.extraction_candidates = len(candidates)
         _write_uat_stage_checkpoint(uat_dir, result, "extraction")
 
+        if _should_stop_after(uat_options.stop_after, "extract"):
+            result.last_completed_stage = "extract"
+            return result
+
         newly_normalized = await event_normalization.run(candidates, run_id)
         if newly_normalized:
             _store_seen_entries_after_normalization(
@@ -936,6 +981,10 @@ class Orchestrator:
         normalized = cached_events + newly_normalized
         result.normalized_events = len(normalized)
         _write_uat_stage_checkpoint(uat_dir, result, "normalization")
+
+        if _should_stop_after(uat_options.stop_after, "normalize"):
+            result.last_completed_stage = "normalize"
+            return result
 
         deduplicated = await deduplication.run(normalized, run_id)
         result.deduplicated_events = len(deduplicated)
@@ -1021,6 +1070,10 @@ class Orchestrator:
         )
         result.enriched_events = len(enriched)
 
+        if _should_stop_after(uat_options.stop_after, "enrich"):
+            result.last_completed_stage = "enrich"
+            return result
+
         ranked = await ranking.run(enriched, profile, run_id)
         result.ranked_events = len(ranked)
         result.top_recommendations = _top_recommendation_rows(ranked)
@@ -1049,11 +1102,14 @@ class Orchestrator:
 
         result.enrichment_cache_hit_rates_pct = cache.enrichment_cache_hit_rates()
         result.evaluation_flags = 0
+        cache.log_run_stats()
+
+        if _should_stop_after(uat_options.stop_after, "email"):
+            result.last_completed_stage = "email"
+            return result
 
         state.phase = "complete"
         clear_pipeline_state()
-
-        cache.log_run_stats()
         result.last_completed_stage = "complete"
 
         logger.info(
