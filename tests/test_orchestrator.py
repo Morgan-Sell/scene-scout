@@ -29,6 +29,7 @@ from scene_scout.models.user import UserProfile
 from scene_scout.orchestrator import (
     Orchestrator,
     PipelineResult,
+    PipelineRunError,
     PipelineState,
     PreEnrichmentFilterResult,
     _batch_custom_id,
@@ -593,6 +594,54 @@ async def test_orchestrator_partial_normalization_stores_seen_entries_without_cr
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_writes_uat_checkpoints_through_normalization(
+    pipeline_state_dir: Path,
+    cache_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = CacheService(run_id=TEST_RUN_ID, db_path=cache_db)
+    source_entry = _raw_entry()
+    candidate = _event_candidate()
+    normalized = _normalized_event()
+
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.feed_scout.run",
+        AsyncMock(return_value=([source_entry], [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_extraction.run",
+        AsyncMock(return_value=[candidate]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_normalization.run",
+        AsyncMock(return_value=[normalized]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.deduplication.run",
+        AsyncMock(side_effect=RuntimeError("dedupe failed")),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.CacheService",
+        lambda run_id, db_path=None: cache,
+    )
+
+    with pytest.raises(PipelineRunError) as exc_info:
+        await Orchestrator().run(SANDLOT_PROMPT, uat_output_base=tmp_path)
+
+    result = exc_info.value.result
+    run_dir = tmp_path / f"uat_{result.run_id}"
+    checkpoint = json.loads((run_dir / "checkpoint.json").read_text(encoding="utf-8"))
+
+    assert checkpoint["run_id"] == result.run_id
+    assert checkpoint["last_completed_stage"] == "normalization"
+    assert checkpoint["counts"]["raw_entries"] == 1
+    assert checkpoint["counts"]["extraction_candidates"] == 1
+    assert checkpoint["counts"]["normalized_events"] == 1
+    assert result.last_completed_stage == "normalization"
 
 
 @pytest.mark.asyncio

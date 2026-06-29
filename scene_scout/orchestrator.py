@@ -213,6 +213,16 @@ class PipelineResult:
     top_recommendations: list[dict[str, Any]] = field(default_factory=list)
     email_preview_path: str | None = None
     email_sent: bool = False
+    last_completed_stage: str = ""
+
+
+class PipelineRunError(Exception):
+    """Raised when the pipeline fails after partial progress."""
+
+    def __init__(self, result: PipelineResult, cause: BaseException) -> None:
+        self.result = result
+        self.cause = cause
+        super().__init__(str(cause))
 
 
 def _pipeline_state_dir() -> Path:
@@ -781,10 +791,36 @@ async def _resolve_user_profile(prompt: str, run_id: str) -> UserProfile:
         )
 
 
+def _uat_run_dir(uat_output_base: Path | None, run_id: str) -> Path | None:
+    if uat_output_base is None:
+        return None
+    run_dir = uat_output_base / f"uat_{run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+def _write_uat_stage_checkpoint(
+    uat_dir: Path | None,
+    result: PipelineResult,
+    stage: str,
+) -> None:
+    if uat_dir is None:
+        return
+    from scene_scout.uat_artifacts import write_uat_checkpoint
+
+    result.last_completed_stage = stage
+    write_uat_checkpoint(uat_dir, result, stage)
+
+
 class Orchestrator:
     """Sequences the SceneScout pipeline from feed fetch through email send."""
 
-    async def run(self, prompt: str) -> PipelineResult:
+    async def run(
+        self,
+        prompt: str,
+        *,
+        uat_output_base: Path | None = None,
+    ) -> PipelineResult:
         """Execute the full pipeline skeleton for a user prompt.
 
         Generates ``run_id``, calls each agent stub in sequence, persists
@@ -794,19 +830,51 @@ class Orchestrator:
         ----------
         prompt : str
             User cold-start or UAT prompt.
+        uat_output_base : Path | None, optional
+            When set (UAT CLI), writes ``checkpoint.json`` under
+            ``{uat_output_base}/uat_{run_id}/`` after major early stages.
 
         Returns
         -------
         PipelineResult
             Per-stage entry counts for this run.
+
+        Raises
+        ------
+        PipelineRunError
+            When a stage fails after partial progress; carries the partial
+            ``PipelineResult`` for failure artifact writes.
         """
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         logger = get_logger("orchestrator", run_id=run_id)
         result = PipelineResult(run_id=run_id, user_prompt=prompt)
         state = PipelineState(run_id=run_id)
+        uat_dir = _uat_run_dir(uat_output_base, run_id)
 
         logger.info("Pipeline started", data={"user_prompt_length": len(prompt)})
 
+        try:
+            return await self._run_pipeline(
+                prompt,
+                run_id=run_id,
+                logger=logger,
+                result=result,
+                state=state,
+                uat_dir=uat_dir,
+            )
+        except Exception as exc:
+            raise PipelineRunError(result, exc) from exc
+
+    async def _run_pipeline(
+        self,
+        prompt: str,
+        *,
+        run_id: str,
+        logger: Any,
+        result: PipelineResult,
+        state: PipelineState,
+        uat_dir: Path | None,
+    ) -> PipelineResult:
         run_migrations()
 
         profile = await _resolve_user_profile(prompt, run_id)
@@ -834,6 +902,7 @@ class Orchestrator:
         result.feeds_unchanged = sum(
             1 for report in feed_reports if report.status == FeedStatus.UNCHANGED
         )
+        _write_uat_stage_checkpoint(uat_dir, result, "feed_scout")
 
         (
             cached_events,
@@ -853,6 +922,7 @@ class Orchestrator:
         else:
             candidates = []
         result.extraction_candidates = len(candidates)
+        _write_uat_stage_checkpoint(uat_dir, result, "extraction")
 
         newly_normalized = await event_normalization.run(candidates, run_id)
         if newly_normalized:
@@ -865,6 +935,7 @@ class Orchestrator:
 
         normalized = cached_events + newly_normalized
         result.normalized_events = len(normalized)
+        _write_uat_stage_checkpoint(uat_dir, result, "normalization")
 
         deduplicated = await deduplication.run(normalized, run_id)
         result.deduplicated_events = len(deduplicated)
@@ -983,6 +1054,7 @@ class Orchestrator:
         clear_pipeline_state()
 
         cache.log_run_stats()
+        result.last_completed_stage = "complete"
 
         logger.info(
             "Pipeline complete",

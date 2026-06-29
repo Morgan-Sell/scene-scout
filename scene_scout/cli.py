@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -21,7 +20,8 @@ from rich.table import Table
 from scene_scout.config import PROJECT_ROOT, is_dry_run
 from scene_scout.email_composer_config import EMAIL_PREVIEW_FILENAME
 from scene_scout.logging import configure_log_level, get_logger
-from scene_scout.orchestrator import Orchestrator, PipelineResult
+from scene_scout.orchestrator import Orchestrator, PipelineResult, PipelineRunError
+from scene_scout.uat_artifacts import write_error_json, write_summary_json
 
 _OUTPUT_DIR = PROJECT_ROOT / "output"
 _CONSOLE = Console()
@@ -41,59 +41,6 @@ def uat_output_dir(run_id: str) -> Path:
         ``output/uat_{run_id}/`` under the project root.
     """
     return _OUTPUT_DIR / f"uat_{run_id}"
-
-
-def write_summary_json(output_dir: Path, result: PipelineResult) -> Path:
-    """Write UAT summary statistics for a pipeline run.
-
-    Parameters
-    ----------
-    output_dir : Path
-        UAT run output directory.
-    result : PipelineResult
-        Per-stage counts from the orchestrator.
-
-    Returns
-    -------
-    Path
-        Path to the written ``summary.json`` file.
-    """
-    summary = {
-        "run_id": result.run_id,
-        "dry_run": is_dry_run(),
-        "raw_entries": result.raw_entries,
-        "feeds_fetched": result.feeds_fetched,
-        "feed_health": result.feed_health,
-        "feeds_unchanged": result.feeds_unchanged,
-        "seen_entries_cache_hits": result.seen_entries_cache_hits,
-        "seen_entries_cache_misses": result.seen_entries_cache_misses,
-        "seen_entries_hit_rate_pct": result.seen_entries_hit_rate_pct,
-        "extraction_candidates": result.extraction_candidates,
-        "normalized_events": result.normalized_events,
-        "deduplicated_events": result.deduplicated_events,
-        "after_description_quality": result.after_description_quality,
-        "after_pre_enrichment_filter": result.after_pre_enrichment_filter,
-        "pre_enrichment_discards": {
-            "low_information": result.pre_enrichment_discard_low_information,
-            "outside_coming_week": result.pre_enrichment_discard_outside_week,
-            "in_exclude_window": result.pre_enrichment_discard_exclude_window,
-        },
-        "enriched_events": result.enriched_events,
-        "enrichment_cache_hit_rates_pct": result.enrichment_cache_hit_rates_pct,
-        "ranked_events": result.ranked_events,
-        "after_sellout_risk": result.after_sellout_risk,
-        "curated_recommendations": result.curated_recommendations,
-        "top_recommendations": result.top_recommendations,
-        "email_preview_path": result.email_preview_path,
-        "email_sent": result.email_sent,
-        "evaluation_flags": result.evaluation_flags,
-    }
-    summary_path = output_dir / "summary.json"
-    summary_path.write_text(
-        json.dumps(summary, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return summary_path
 
 
 def print_uat_summary(result: PipelineResult) -> None:
@@ -245,11 +192,28 @@ async def run_uat(
         data={"dry_run": is_dry_run(), "verbose": verbose},
     )
 
-    result = await Orchestrator().run(prompt)
+    try:
+        result = await Orchestrator().run(prompt, uat_output_base=_OUTPUT_DIR)
+    except PipelineRunError as exc:
+        result = exc.result
+        output_dir = uat_output_dir(result.run_id)
+        write_error_json(output_dir, result, exc.cause)
+        write_summary_json(output_dir, result, status="failed")
+        logger = get_logger("orchestrator", run_id=result.run_id)
+        logger.error(
+            "UAT run failed",
+            data={
+                "dry_run": is_dry_run(),
+                "output_dir": str(output_dir),
+                "last_completed_stage": result.last_completed_stage,
+                "exception_type": type(exc.cause).__name__,
+                "message": str(exc.cause),
+            },
+        )
+        raise
 
     output_dir = uat_output_dir(result.run_id)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    write_summary_json(output_dir, result)
+    write_summary_json(output_dir, result, status="completed")
     print_uat_summary(result)
 
     logger = get_logger("orchestrator", run_id=result.run_id)
@@ -321,13 +285,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "uat":
-        asyncio.run(
-            run_uat(
-                args.prompt,
-                dry_run=args.dry_run,
-                verbose=args.verbose,
+        try:
+            asyncio.run(
+                run_uat(
+                    args.prompt,
+                    dry_run=args.dry_run,
+                    verbose=args.verbose,
+                )
             )
-        )
+        except PipelineRunError:
+            return 1
         return 0
 
     parser.error(f"Unknown command: {args.command}")
