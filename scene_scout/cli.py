@@ -9,22 +9,30 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
 
-from scene_scout.config import PROJECT_ROOT, is_dry_run
+from scene_scout.agents import feed_scout
+from scene_scout.config import PROJECT_ROOT, is_dry_run, load_feed_configs
 from scene_scout.email_composer_config import EMAIL_PREVIEW_FILENAME
 from scene_scout.logging import configure_log_level, get_logger
+from scene_scout.models.feed import FeedHealthReport, FeedStatus
 from scene_scout.orchestrator import Orchestrator, PipelineResult, PipelineRunError
+from scene_scout.services.cache import CacheService
 from scene_scout.uat_artifacts import write_error_json, write_summary_json
 
 _OUTPUT_DIR = PROJECT_ROOT / "output"
 _CONSOLE = Console()
+_FEED_PROBE_HEALTHY_STATUSES = frozenset({FeedStatus.OK, FeedStatus.UNCHANGED})
 
 
 def uat_output_dir(run_id: str) -> Path:
@@ -41,6 +49,152 @@ def uat_output_dir(run_id: str) -> Path:
         ``output/uat_{run_id}/`` under the project root.
     """
     return _OUTPUT_DIR / f"uat_{run_id}"
+
+
+def feed_probe_run_id(now: datetime | None = None) -> str:
+    """Return a UTC timestamp id for a feed-probe run."""
+    reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return reference.strftime("%Y%m%d-%H%M%S")
+
+
+def feed_probe_output_path(run_id: str) -> Path:
+    """Return ``output/feed_probe_{run_id}.json`` under the project root."""
+    return _OUTPUT_DIR / f"feed_probe_{run_id}.json"
+
+
+def feed_probe_is_healthy(report: FeedHealthReport) -> bool:
+    """Return True when ingest succeeded or the feed was unchanged (304)."""
+    return report.status in _FEED_PROBE_HEALTHY_STATUSES
+
+
+def serialize_feed_health_report(report: FeedHealthReport) -> dict[str, Any]:
+    """Serialize a feed health report for JSON output."""
+    return {
+        "feed_id": report.feed_id,
+        "feed_name": report.feed_name,
+        "feed_url": report.feed_url,
+        "status": report.status.value,
+        "entries_fetched": report.entries_fetched,
+        "error_message": report.error_message,
+    }
+
+
+def build_feed_probe_payload(
+    run_id: str,
+    entries: list[Any],
+    reports: list[FeedHealthReport],
+) -> dict[str, Any]:
+    """Build the feed-probe JSON payload."""
+    feeds_unchanged = sum(
+        1 for report in reports if report.status == FeedStatus.UNCHANGED
+    )
+    all_ok = all(feed_probe_is_healthy(report) for report in reports)
+    return {
+        "run_id": run_id,
+        "feeds_fetched": len(reports),
+        "feeds_unchanged": feeds_unchanged,
+        "raw_entries": len(entries),
+        "all_ok": all_ok,
+        "feed_health": [serialize_feed_health_report(report) for report in reports],
+    }
+
+
+def print_feed_probe_summary(
+    reports: list[FeedHealthReport],
+    *,
+    raw_entries: int,
+    output_path: Path,
+) -> None:
+    """Print the feed-probe table to the terminal."""
+    feed_table = Table(
+        title="Feed probe",
+        show_header=True,
+        header_style="bold",
+    )
+    feed_table.add_column("Feed", style="cyan")
+    feed_table.add_column("Status")
+    feed_table.add_column("Entries", justify="right")
+    feed_table.add_column("Error")
+
+    for report in reports:
+        feed_table.add_row(
+            report.feed_name,
+            report.status.value,
+            str(report.entries_fetched),
+            report.error_message or "—",
+        )
+
+    _CONSOLE.print(feed_table)
+    _CONSOLE.print(
+        f"\nFeeds: {len(reports)}  "
+        f"Raw entries: {raw_entries}  "
+        f"UNCHANGED (304): {sum(1 for r in reports if r.status == FeedStatus.UNCHANGED)}"
+    )
+    _CONSOLE.print(f"Report: [green]{output_path}[/green]")
+
+
+def write_feed_probe_json(output_path: Path, payload: dict[str, Any]) -> Path:
+    """Write feed-probe results to disk."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return output_path
+
+
+@dataclass(frozen=True)
+class FeedProbeResult:
+    """Outcome of a feed-probe run."""
+
+    run_id: str
+    output_path: Path
+    payload: dict[str, Any]
+    exit_code: int
+
+
+async def run_feed_probe(
+    *,
+    allow_failures: bool = False,
+    verbose: bool = False,
+    now: datetime | None = None,
+) -> FeedProbeResult:
+    """Fetch all active feeds and report ingest health without LLM calls."""
+    if verbose:
+        configure_log_level(logging.DEBUG)
+
+    run_id = feed_probe_run_id(now)
+    logger = get_logger("feed_scout", run_id=run_id)
+    logger.info("Feed probe starting", data={"active_feeds": "pending"})
+
+    feed_configs = load_feed_configs()
+    cache = CacheService(run_id=run_id)
+    entries, reports = await feed_scout.run(
+        feed_configs,
+        run_id,
+        get_feed_etag=cache.get_feed_etag,
+        store_feed_etag=cache.set_feed_etag,
+    )
+
+    payload = build_feed_probe_payload(run_id, entries, reports)
+    output_path = write_feed_probe_json(feed_probe_output_path(run_id), payload)
+    print_feed_probe_summary(reports, raw_entries=len(entries), output_path=output_path)
+
+    all_ok = payload["all_ok"]
+    exit_code = 0 if all_ok or allow_failures else 1
+    logger.info(
+        "Feed probe complete",
+        data={
+            "output_path": str(output_path),
+            "feeds_fetched": payload["feeds_fetched"],
+            "raw_entries": payload["raw_entries"],
+            "all_ok": all_ok,
+            "exit_code": exit_code,
+        },
+    )
+    return FeedProbeResult(
+        run_id=run_id,
+        output_path=output_path,
+        payload=payload,
+        exit_code=exit_code,
+    )
 
 
 def print_uat_summary(result: PipelineResult) -> None:
@@ -265,6 +419,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable DEBUG-level agent logs",
     )
 
+    feed_probe_parser = subparsers.add_parser(
+        "feed-probe",
+        help="Ingest-only feed health check (no LLM)",
+    )
+    feed_probe_parser.add_argument(
+        "--allow-failures",
+        action="store_true",
+        help="Exit 0 even when one or more active feeds are not ok/unchanged",
+    )
+    feed_probe_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable DEBUG-level agent logs",
+    )
+
     return parser
 
 
@@ -296,6 +465,15 @@ def main(argv: list[str] | None = None) -> int:
         except PipelineRunError:
             return 1
         return 0
+
+    if args.command == "feed-probe":
+        result = asyncio.run(
+            run_feed_probe(
+                allow_failures=args.allow_failures,
+                verbose=args.verbose,
+            )
+        )
+        return result.exit_code
 
     parser.error(f"Unknown command: {args.command}")
     return 1
