@@ -350,14 +350,36 @@ def _find_source_entry(
     return None
 
 
+def _find_candidate_for_normalized_event(
+    normalized_event: NormalizedEvent,
+    candidates: list[Any],
+) -> Any | None:
+    """Match a normalized event back to its extraction candidate."""
+    for candidate in candidates:
+        if (
+            candidate.source_feed == normalized_event.best_source_feed
+            and candidate.url.strip() == normalized_event.url
+            and candidate.title.strip() == normalized_event.title
+        ):
+            return candidate
+    return None
+
+
 def _store_seen_entries_after_normalization(
     cache: CacheService,
     candidates: list[Any],
     normalized_events: list[NormalizedEvent],
     source_entries: list[RawFeedEntry],
 ) -> None:
-    """Persist newly normalized events to ``seen_entries`` cache."""
-    for candidate, normalized_event in zip(candidates, normalized_events, strict=True):
+    """Persist newly normalized events to ``seen_entries`` cache.
+
+    Only successfully normalized events are cached. ``candidates`` may be longer
+    than ``normalized_events`` when normalization discards rows.
+    """
+    for normalized_event in normalized_events:
+        candidate = _find_candidate_for_normalized_event(normalized_event, candidates)
+        if candidate is None:
+            continue
         source = _find_source_entry(candidate, source_entries)
         if source is None:
             continue
