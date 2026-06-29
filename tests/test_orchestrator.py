@@ -315,6 +315,75 @@ def test_store_seen_entries_after_normalization(cache_db: Path) -> None:
     assert cache.get_seen_entry(SANDLOT_FEED_ID, entry_hash) == normalized
 
 
+def test_store_seen_entries_after_partial_normalization(cache_db: Path) -> None:
+    """Regression: UAT-scale partial normalization must not zip strict mismatch."""
+    cache = CacheService(run_id=TEST_RUN_ID, db_path=cache_db)
+    candidate_count = 120
+    normalized_count = 19
+
+    source_entries: list[RawFeedEntry] = []
+    candidates: list[EventCandidate] = []
+    normalized_events: list[NormalizedEvent] = []
+
+    for index in range(candidate_count):
+        link = f"https://example.com/event-{index}"
+        published = f"Fri, {index:02d} Jun 2025 20:00:00 +0000"
+        source_entries.append(
+            _raw_entry(
+                link=link,
+                published_raw=published,
+                title=f"Sandlot Event {index}",
+            )
+        )
+        candidates.append(
+            EventCandidate.from_llm_output(
+                EventCandidateLLMOutput.model_validate(
+                    {
+                        "title": f"Sandlot Event {index}",
+                        "date": "Sat, Jun 7 2025",
+                        "time": "6:00 PM",
+                        "venue": "The Sandlot",
+                        "city": "Los Angeles",
+                        "url": link,
+                        "is_event": True,
+                        "extraction_confidence": 0.9,
+                    }
+                ),
+                source_feed=SANDLOT_FEED_ID,
+                run_id=TEST_RUN_ID,
+                extracted_at=datetime(2025, 6, 6, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+
+    for index in range(normalized_count):
+        link = f"https://example.com/event-{index}"
+        normalized_events.append(
+            _normalized_event(
+                id=f"sandlot-event-{index}",
+                title=f"Sandlot Event {index}",
+                url=link,
+            )
+        )
+
+    _store_seen_entries_after_normalization(
+        cache,
+        candidates,
+        normalized_events,
+        source_entries,
+    )
+
+    stored_hashes = {
+        compute_entry_hash(entry) for entry in source_entries[:normalized_count]
+    }
+    for entry in source_entries[normalized_count:]:
+        assert cache.get_seen_entry(SANDLOT_FEED_ID, compute_entry_hash(entry)) is None
+
+    for entry in source_entries[:normalized_count]:
+        entry_hash = compute_entry_hash(entry)
+        assert entry_hash in stored_hashes
+        assert cache.get_seen_entry(SANDLOT_FEED_ID, entry_hash) is not None
+
+
 @pytest.mark.asyncio
 async def test_orchestrator_run_returns_zero_counts(pipeline_state_dir: Path) -> None:
     result = await Orchestrator().run(SANDLOT_PROMPT)
@@ -436,6 +505,94 @@ async def test_orchestrator_seen_entries_cache_miss_runs_extraction_and_stores(
 
     entry_hash = compute_entry_hash(source_entry)
     assert cache.get_seen_entry(SANDLOT_FEED_ID, entry_hash) == normalized
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_partial_normalization_stores_seen_entries_without_crash(
+    pipeline_state_dir: Path,
+    cache_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = CacheService(run_id=TEST_RUN_ID, db_path=cache_db)
+    source_entries = [
+        _raw_entry(
+            link=f"https://example.com/event-{index}",
+            published_raw=f"Fri, {index:02d} Jun 2025 20:00:00 +0000",
+            title=f"Sandlot Event {index}",
+        )
+        for index in range(5)
+    ]
+    candidates = [
+        EventCandidate.from_llm_output(
+            EventCandidateLLMOutput.model_validate(
+                {
+                    "title": f"Sandlot Event {index}",
+                    "date": "Sat, Jun 7 2025",
+                    "time": "6:00 PM",
+                    "venue": "The Sandlot",
+                    "city": "Los Angeles",
+                    "url": f"https://example.com/event-{index}",
+                    "is_event": True,
+                    "extraction_confidence": 0.9,
+                }
+            ),
+            source_feed=SANDLOT_FEED_ID,
+            run_id=TEST_RUN_ID,
+            extracted_at=datetime(2025, 6, 6, 12, 0, tzinfo=timezone.utc),
+        )
+        for index in range(5)
+    ]
+    normalized_subset = [
+        _normalized_event(
+            id=f"sandlot-event-{index}",
+            title=f"Sandlot Event {index}",
+            url=f"https://example.com/event-{index}",
+        )
+        for index in range(2)
+    ]
+
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.feed_scout.run",
+        AsyncMock(return_value=(source_entries, [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_extraction.run",
+        AsyncMock(return_value=candidates),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_normalization.run",
+        AsyncMock(return_value=normalized_subset),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.CacheService",
+        lambda run_id, db_path=None: cache,
+    )
+
+    result = await Orchestrator().run(SANDLOT_PROMPT)
+
+    assert result.extraction_candidates == 5
+    assert result.normalized_events == 2
+    assert (
+        cache.get_seen_entry(
+            SANDLOT_FEED_ID,
+            compute_entry_hash(source_entries[0]),
+        )
+        == normalized_subset[0]
+    )
+    assert (
+        cache.get_seen_entry(
+            SANDLOT_FEED_ID,
+            compute_entry_hash(source_entries[1]),
+        )
+        == normalized_subset[1]
+    )
+    assert (
+        cache.get_seen_entry(
+            SANDLOT_FEED_ID,
+            compute_entry_hash(source_entries[2]),
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
