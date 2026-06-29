@@ -4,19 +4,25 @@ Tests for the SceneScout CLI and UAT skeleton.
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from scene_scout.cli import (
+    build_feed_probe_payload,
     build_parser,
+    feed_probe_output_path,
+    feed_probe_run_id,
     main,
     print_uat_summary,
+    run_feed_probe,
     run_uat,
     uat_output_dir,
 )
 from scene_scout.logging.logger import _logger_cache
+from scene_scout.models.feed import FeedHealthReport, FeedStatus
 from scene_scout.orchestrator import PipelineResult, PipelineRunError
 from scene_scout.uat_artifacts import write_summary_json
 from tests.conftest import TEST_RUN_ID
@@ -25,6 +31,28 @@ SANDLOT_PROMPT = (
     "I love sandlot baseball, pool parties at the rec center, "
     "and legends of the Great Bambino."
 )
+
+PROBE_NOW = datetime(2026, 6, 29, 12, 34, 56, tzinfo=timezone.utc)
+PROBE_RUN_ID = "20260629-123456"
+
+
+def _feed_health_report(**overrides: object) -> FeedHealthReport:
+    payload = {
+        "feed_id": "brooklynvegan",
+        "feed_name": "BrooklynVegan",
+        "feed_url": "https://www.brooklynvegan.com/feed/",
+        "status": FeedStatus.OK,
+        "entries_fetched": 12,
+        "fetched_at": PROBE_NOW,
+    }
+    payload.update(overrides)
+    return FeedHealthReport.model_validate(payload)
+
+
+def _mock_cache_service() -> MagicMock:
+    cache = MagicMock()
+    cache.get_feed_etag.return_value = None
+    return cache
 
 
 @pytest.fixture
@@ -51,6 +79,157 @@ def test_build_parser_uat_subcommand() -> None:
     assert args.prompt == SANDLOT_PROMPT
     assert args.dry_run is True
     assert args.verbose is True
+
+
+def test_build_parser_feed_probe_subcommand() -> None:
+    args = build_parser().parse_args(["feed-probe", "--allow-failures", "--verbose"])
+
+    assert args.command == "feed-probe"
+    assert args.allow_failures is True
+    assert args.verbose is True
+
+
+def test_feed_probe_run_id_and_output_path() -> None:
+    assert feed_probe_run_id(PROBE_NOW) == PROBE_RUN_ID
+    assert (
+        feed_probe_output_path(PROBE_RUN_ID).name == f"feed_probe_{PROBE_RUN_ID}.json"
+    )
+
+
+def test_build_feed_probe_payload_marks_all_ok_when_feeds_healthy() -> None:
+    reports = [
+        _feed_health_report(),
+        _feed_health_report(
+            feed_id="theskint",
+            feed_name="the skint",
+            feed_url="https://www.theskint.com/feed/",
+            status=FeedStatus.UNCHANGED,
+            entries_fetched=0,
+        ),
+    ]
+
+    payload = build_feed_probe_payload(PROBE_RUN_ID, ["entry"] * 12, reports)
+
+    assert payload["run_id"] == PROBE_RUN_ID
+    assert payload["feeds_fetched"] == 2
+    assert payload["feeds_unchanged"] == 1
+    assert payload["raw_entries"] == 12
+    assert payload["all_ok"] is True
+    assert payload["feed_health"][1]["status"] == "unchanged"
+
+
+@pytest.mark.asyncio
+async def test_run_feed_probe_writes_json_and_returns_zero_on_success(
+    output_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = [_feed_health_report()]
+    monkeypatch.setattr(
+        "scene_scout.cli.load_feed_configs",
+        lambda: [object()],
+    )
+    monkeypatch.setattr(
+        "scene_scout.cli.feed_scout.run",
+        AsyncMock(return_value=(["entry"] * 12, reports)),
+    )
+    monkeypatch.setattr(
+        "scene_scout.cli.CacheService",
+        lambda run_id, db_path=None: _mock_cache_service(),
+    )
+
+    result = await run_feed_probe(now=PROBE_NOW)
+
+    assert result.exit_code == 0
+    assert result.output_path == output_dir / f"feed_probe_{PROBE_RUN_ID}.json"
+    payload = json.loads(result.output_path.read_text(encoding="utf-8"))
+    assert payload["all_ok"] is True
+    assert payload["raw_entries"] == 12
+    assert payload["feed_health"][0]["feed_name"] == "BrooklynVegan"
+
+
+@pytest.mark.asyncio
+async def test_run_feed_probe_returns_nonzero_when_feed_unhealthy(
+    output_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = [
+        _feed_health_report(
+            status=FeedStatus.UNREACHABLE,
+            entries_fetched=0,
+            error_message="HTTP 401",
+        )
+    ]
+    monkeypatch.setattr("scene_scout.cli.load_feed_configs", lambda: [object()])
+    monkeypatch.setattr(
+        "scene_scout.cli.feed_scout.run",
+        AsyncMock(return_value=([], reports)),
+    )
+    monkeypatch.setattr(
+        "scene_scout.cli.CacheService",
+        lambda run_id, db_path=None: _mock_cache_service(),
+    )
+
+    result = await run_feed_probe(now=PROBE_NOW)
+
+    assert result.exit_code == 1
+    assert result.payload["all_ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_feed_probe_allow_failures_returns_zero(
+    output_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = [
+        _feed_health_report(
+            status=FeedStatus.MALFORMED,
+            entries_fetched=0,
+            error_message="bad xml",
+        )
+    ]
+    monkeypatch.setattr("scene_scout.cli.load_feed_configs", lambda: [object()])
+    monkeypatch.setattr(
+        "scene_scout.cli.feed_scout.run",
+        AsyncMock(return_value=([], reports)),
+    )
+    monkeypatch.setattr(
+        "scene_scout.cli.CacheService",
+        lambda run_id, db_path=None: _mock_cache_service(),
+    )
+
+    result = await run_feed_probe(now=PROBE_NOW, allow_failures=True)
+
+    assert result.exit_code == 0
+
+
+def test_main_feed_probe_exits_nonzero_on_failed_feed(
+    output_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports = [
+        _feed_health_report(
+            status=FeedStatus.STALE,
+            entries_fetched=1,
+            error_message="below threshold",
+        )
+    ]
+    monkeypatch.setattr(
+        "scene_scout.cli.feed_probe_run_id", lambda now=None: PROBE_RUN_ID
+    )
+    monkeypatch.setattr("scene_scout.cli.load_feed_configs", lambda: [object()])
+    monkeypatch.setattr(
+        "scene_scout.cli.feed_scout.run",
+        AsyncMock(return_value=([], reports)),
+    )
+    monkeypatch.setattr(
+        "scene_scout.cli.CacheService",
+        lambda run_id, db_path=None: _mock_cache_service(),
+    )
+
+    exit_code = main(["feed-probe"])
+
+    assert exit_code == 1
+    assert (output_dir / f"feed_probe_{PROBE_RUN_ID}.json").exists()
 
 
 def test_write_summary_json_writes_pipeline_counts(tmp_path: Path) -> None:
