@@ -2,21 +2,29 @@
 Tests for the iCal/ICS source adapter.
 
 Covers successful parse, field mapping, webcal URL normalization,
-and health reporting for unreachable, malformed, and empty calendars.
+window pre-filtering, and health reporting for unreachable, malformed,
+and empty calendars.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 import respx
 from httpx import Response
+from icalendar import Calendar
 
-from scene_scout.agents.sources.ical import IcalSourceAdapter
+from scene_scout.agents.sources.ical import (
+    IcalSourceAdapter,
+    _filter_vevents_by_window,
+)
 from scene_scout.agents.sources.protocol import CacheHooks
 from scene_scout.models.feed import FeedConfig, FeedStatus
+from scene_scout.normalization_config import NORMALIZATION_WINDOW_DAYS
 from tests.conftest import TEST_RUN_ID
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "ical"
+_ICAL_REFERENCE_NOW = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
 
 
 def _fixture(name: str) -> str:
@@ -32,6 +40,16 @@ def _make_config(url: str = "https://example.com/events.ics") -> FeedConfig:
         source_quality_score=0.8,
         source_type="ical",
     )
+
+
+@pytest.fixture(autouse=True)
+def ical_reference_now(monkeypatch: pytest.MonkeyPatch) -> datetime:
+    """Anchor iCal window filtering so fixture dates stay in-window."""
+    monkeypatch.setattr(
+        "scene_scout.agents.sources.ical._utc_now",
+        lambda: _ICAL_REFERENCE_NOW,
+    )
+    return _ICAL_REFERENCE_NOW
 
 
 @respx.mock
@@ -71,7 +89,7 @@ async def test_vevent_fields_mapped_to_raw_feed_entry():
     assert first.title == "Sandlot Storytime"
     assert first.link == "https://example.com/events/sandlot-storytime"
     assert "read-aloud" in first.description.lower()
-    assert first.published_raw == "2026-07-15T15:00:00+00:00"
+    assert first.published_raw == "2026-07-13T15:00:00+00:00"
     assert first.author == "Library Programs"
     assert "Storytime" in first.categories
     assert first.feed_id == "ical_test"
@@ -92,7 +110,7 @@ async def test_all_day_event_published_raw_is_date_only():
         cache_hooks=CacheHooks(),
     )
 
-    assert entries[1].published_raw == "2026-07-20"
+    assert entries[1].published_raw == "2026-07-15"
 
 
 @respx.mock
@@ -160,3 +178,110 @@ async def test_empty_calendar_produces_empty_report():
 
     assert entries == []
     assert report.status == FeedStatus.EMPTY
+    assert report.error_message == "Calendar returned no VEVENT entries"
+
+
+@respx.mock
+async def test_ical_prefilter_keeps_in_window_vevents():
+    config = _make_config()
+    respx.get(config.url).mock(
+        return_value=Response(200, content=_fixture("mixed_window_events.ics"))
+    )
+
+    entries, report = await IcalSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(),
+    )
+
+    titles = {entry.title for entry in entries}
+    assert titles == {"Near Term Concert", "All Day Block Party"}
+    assert report.entries_fetched == 2
+    assert report.status == FeedStatus.OK
+
+
+@respx.mock
+async def test_ical_prefilter_drops_out_of_window_vevents():
+    config = _make_config()
+    respx.get(config.url).mock(
+        return_value=Response(200, content=_fixture("mixed_window_events.ics"))
+    )
+
+    entries, _ = await IcalSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(),
+    )
+
+    assert all(entry.title != "Far Future Festival" for entry in entries)
+
+
+@respx.mock
+async def test_ical_prefilter_all_day_event_respects_window():
+    config = _make_config()
+    respx.get(config.url).mock(
+        return_value=Response(200, content=_fixture("past_and_future.ics"))
+    )
+
+    entries, report = await IcalSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(),
+    )
+
+    assert len(entries) == 1
+    assert entries[0].title == "Tomorrow Show"
+    assert report.entries_fetched == 1
+
+
+@respx.mock
+async def test_ical_prefilter_empty_after_filter_returns_empty_status():
+    config = _make_config()
+    respx.get(config.url).mock(
+        return_value=Response(200, content=_fixture("all_out_of_window.ics"))
+    )
+
+    entries, report = await IcalSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(),
+    )
+
+    assert entries == []
+    assert report.status == FeedStatus.EMPTY
+    assert report.entries_fetched == 0
+    assert (
+        report.error_message
+        == f"No VEVENT entries within {NORMALIZATION_WINDOW_DAYS}-day window"
+    )
+
+
+@respx.mock
+async def test_ical_prefilter_report_entries_fetched_is_post_filter_count():
+    config = _make_config()
+    respx.get(config.url).mock(
+        return_value=Response(200, content=_fixture("mixed_window_events.ics"))
+    )
+
+    _, report = await IcalSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(),
+    )
+
+    assert report.entries_fetched == 2
+
+
+def test_filter_vevents_by_window_unit() -> None:
+    calendar = Calendar.from_ical(_fixture("mixed_window_events.ics"))
+    vevents = list(calendar.walk("VEVENT"))
+
+    kept = _filter_vevents_by_window(
+        vevents,
+        now=_ICAL_REFERENCE_NOW,
+        window_days=NORMALIZATION_WINDOW_DAYS,
+        feed_id="ical_test",
+    )
+
+    kept_titles = {str(component.get("summary")) for component in kept}
+    assert kept_titles == {"Near Term Concert", "All Day Block Party"}

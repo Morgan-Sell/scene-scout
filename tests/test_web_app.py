@@ -73,7 +73,10 @@ def test_health_returns_ok(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_profile_returns_404_when_missing(client: TestClient) -> None:
+def test_profile_returns_404_when_missing(
+    client: TestClient,
+    profiles_dir: Path,
+) -> None:
     response = client.get("/api/profile")
     assert response.status_code == 404
     assert response.json()["error"] == "No profile saved yet."

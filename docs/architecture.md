@@ -758,8 +758,9 @@ contract stays the same.
 | Log color | Cyan |
 | Failure handling | Per-feed: log + skip. Never halts pipeline. |
 
-Reads full feed snapshot (typically 10–50 entries). No artificial cap. Temporal scoping
-handled by Normalization Agent's 7-day date filter downstream.
+Reads full feed snapshot (typically 10–50 entries). No artificial cap for RSS. The iCal
+adapter pre-filters VEVENTs to the 7-day window before extraction; other source types
+rely on the Normalization Agent's date filter downstream.
 
 Sends `If-None-Match` / `If-Modified-Since` on every request. On `304`, status is
 `UNCHANGED`; feed is skipped. ETag/Last-Modified stored in `feed_etags` after each

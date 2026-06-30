@@ -4,8 +4,11 @@ iCal/ICS source adapter.
 Fetches calendar files and maps VEVENT components to RawFeedEntry.
 """
 
-from datetime import date, datetime, timezone
-from typing import Optional
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -18,10 +21,17 @@ from scene_scout.models.feed import (
     FeedStatus,
     RawFeedEntry,
 )
+from scene_scout.normalization_config import NORMALIZATION_WINDOW_DAYS
 
 _FETCH_TIMEOUT_SECONDS = 10
 _MIN_EXPECTED_ENTRIES = 1
 _USER_AGENT = "SceneScout/0.1 (event discovery agent)"
+logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> datetime:
+    """Return the current UTC time (patchable in tests)."""
+    return datetime.now(timezone.utc)
 
 
 class IcalSourceAdapter:
@@ -55,7 +65,7 @@ async def _fetch_ical(
     run_id: str,
 ) -> tuple[list[RawFeedEntry], FeedHealthReport]:
     """Fetch and parse a single ICS calendar."""
-    fetched_at = datetime.now(timezone.utc)
+    fetched_at = _utc_now()
     request_url = _normalize_ics_url(config.url)
 
     try:
@@ -102,12 +112,8 @@ async def _fetch_ical(
             error_message="ICS parse error: root component is not a calendar",
         )
 
-    entries = [
-        _parse_vevent(component, config, fetched_at, run_id)
-        for component in calendar.walk("VEVENT")
-    ]
-
-    if not entries:
+    vevents = list(calendar.walk("VEVENT"))
+    if not vevents:
         return [], _health_report(
             config,
             FeedStatus.EMPTY,
@@ -115,6 +121,29 @@ async def _fetch_ical(
             entries_fetched=0,
             error_message="Calendar returned no VEVENT entries",
         )
+
+    kept_vevents = _filter_vevents_by_window(
+        vevents,
+        now=fetched_at,
+        window_days=NORMALIZATION_WINDOW_DAYS,
+        feed_id=config.id,
+    )
+
+    if not kept_vevents:
+        return [], _health_report(
+            config,
+            FeedStatus.EMPTY,
+            fetched_at,
+            entries_fetched=0,
+            error_message=(
+                f"No VEVENT entries within {NORMALIZATION_WINDOW_DAYS}-day window"
+            ),
+        )
+
+    entries = [
+        _parse_vevent(component, config, fetched_at, run_id)
+        for component in kept_vevents
+    ]
 
     status = (
         FeedStatus.OK if len(entries) >= _MIN_EXPECTED_ENTRIES else FeedStatus.STALE
@@ -125,6 +154,103 @@ async def _fetch_ical(
         fetched_at,
         entries_fetched=len(entries),
     )
+
+
+def _parse_ical_datetime(value: Any) -> datetime | None:
+    """Parse an iCalendar date/time property to a timezone-aware UTC datetime."""
+    if value is None:
+        return None
+
+    dt_value = getattr(value, "dt", None)
+    if isinstance(dt_value, datetime):
+        if dt_value.tzinfo is None:
+            return dt_value.replace(tzinfo=timezone.utc)
+        return dt_value.astimezone(timezone.utc)
+    if isinstance(dt_value, date):
+        return datetime.combine(dt_value, datetime.min.time(), tzinfo=timezone.utc)
+
+    return None
+
+
+def _is_all_day_property(value: Any) -> bool:
+    """Return True when an iCalendar property uses a DATE (all-day) value."""
+    dt_value = getattr(value, "dt", None)
+    return isinstance(dt_value, date) and not isinstance(dt_value, datetime)
+
+
+def _end_of_utc_day(day: date) -> datetime:
+    """Return the last representable instant on ``day`` in UTC."""
+    return datetime.combine(day, datetime.max.time(), tzinfo=timezone.utc).replace(
+        microsecond=0,
+    )
+
+
+def _vevent_end(component: Component, start: datetime) -> datetime:
+    """Return the inclusive end instant for overlap checks."""
+    dtend_prop = component.get("dtend")
+    if dtend_prop is None:
+        if _is_all_day_property(component.get("dtstart")):
+            return _end_of_utc_day(start.date())
+        return start
+
+    end = _parse_ical_datetime(dtend_prop)
+    if end is None:
+        return start
+
+    if _is_all_day_property(dtend_prop):
+        inclusive_last_day = end.date() - timedelta(days=1)
+        return _end_of_utc_day(inclusive_last_day)
+
+    return end
+
+
+def _vevent_intersects_window(
+    component: Component,
+    *,
+    now: datetime,
+    window_days: int = NORMALIZATION_WINDOW_DAYS,
+) -> bool:
+    """Return True when a VEVENT overlaps the coming ``window_days``."""
+    start = _parse_ical_datetime(component.get("dtstart"))
+    if start is None:
+        return False
+
+    end = _vevent_end(component, start)
+    reference = now.astimezone(timezone.utc)
+    window_end = reference + timedelta(days=window_days)
+    return start <= window_end and end >= reference
+
+
+def _filter_vevents_by_window(
+    components: list[Component],
+    *,
+    now: datetime,
+    window_days: int,
+    feed_id: str,
+) -> list[Component]:
+    """Keep VEVENT components whose DTSTART/DTEND overlap the window."""
+    kept = [
+        component
+        for component in components
+        if _vevent_intersects_window(component, now=now, window_days=window_days)
+    ]
+    dropped = len(components) - len(kept)
+    if dropped:
+        logger.info(
+            "Filtered iCal VEVENTs outside %s-day window for feed %s",
+            window_days,
+            feed_id,
+            extra={
+                "data": {
+                    "feed_id": feed_id,
+                    "vevents_total": len(components),
+                    "vevents_kept": len(kept),
+                    "vevents_dropped": dropped,
+                    "window_days": window_days,
+                }
+            },
+        )
+    return kept
 
 
 def _parse_vevent(
