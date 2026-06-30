@@ -2,6 +2,10 @@
 
 NORMALIZATION_WINDOW_DAYS = 7
 
+# Aggregated discard logging (UAT-D.6).
+NORMALIZATION_DISCARD_TERMINAL_SAMPLE_SIZE = 5
+NORMALIZATION_DISCARD_JSONL_SAMPLE_SIZE = 50
+
 # Controlled vocabulary for event categories after normalization.
 EVENT_CATEGORIES: frozenset[str] = frozenset(
     {

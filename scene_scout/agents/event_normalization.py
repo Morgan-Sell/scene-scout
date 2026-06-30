@@ -15,7 +15,10 @@ Outputs : list[NormalizedEvent]
 from __future__ import annotations
 
 import re
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from urllib.parse import urlparse
 
 from dateutil import parser as date_parser
@@ -30,6 +33,8 @@ from scene_scout.models.event import (
 from scene_scout.normalization_config import (
     CATEGORY_ALIASES,
     EVENT_CATEGORIES,
+    NORMALIZATION_DISCARD_JSONL_SAMPLE_SIZE,
+    NORMALIZATION_DISCARD_TERMINAL_SAMPLE_SIZE,
     NORMALIZATION_WINDOW_DAYS,
 )
 
@@ -38,9 +43,92 @@ _WHITESPACE = re.compile(r"\s+")
 _PRICE_DOLLARS = re.compile(r"\$(\d+(?:\.\d{2})?)")
 _FREE_PRICE_TOKENS = frozenset({"free", "no cover", "gratis", "complimentary"})
 
+DISCARD_UNPARSEABLE_DATE = "unparseable_date"
+DISCARD_MISSING_VENUE = "missing_venue"
+DISCARD_INVALID_URL = "invalid_url"
+DISCARD_OUTSIDE_WINDOW = "outside_window"
+DISCARD_NORMALIZATION_ERROR = "normalization_error"
+
+_DISCARD_REASON_LABELS: dict[str, str] = {
+    DISCARD_UNPARSEABLE_DATE: "unparseable date",
+    DISCARD_MISSING_VENUE: "missing venue",
+    DISCARD_INVALID_URL: "invalid URL",
+    DISCARD_OUTSIDE_WINDOW: "outside normalization window",
+    DISCARD_NORMALIZATION_ERROR: "normalization error",
+}
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@dataclass(frozen=True)
+class NormalizationResult:
+    """Outcome of normalizing a single candidate."""
+
+    event: NormalizedEvent | None
+    discard_reason: str | None = None
+    discard_data: dict[str, Any] | None = None
+
+
+class NormalizationDiscardCollector:
+    """Aggregate normalization discards for capped terminal and JSONL output."""
+
+    def __init__(self) -> None:
+        self._by_reason: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    def record(self, reason: str, discard_data: dict[str, Any]) -> None:
+        self._by_reason[reason].append(discard_data)
+
+    @property
+    def total(self) -> int:
+        return sum(len(entries) for entries in self._by_reason.values())
+
+    def emit(self, logger: Any) -> None:
+        if not self._by_reason:
+            return
+
+        for reason in sorted(self._by_reason):
+            discards = self._by_reason[reason]
+            count = len(discards)
+            sample_titles = [
+                str(entry.get("title", ""))
+                for entry in discards[:NORMALIZATION_DISCARD_TERMINAL_SAMPLE_SIZE]
+                if entry.get("title")
+            ]
+            label = _DISCARD_REASON_LABELS.get(reason, reason)
+            examples = ""
+            if sample_titles:
+                examples = f" (e.g. {', '.join(sample_titles)}"
+                if count > len(sample_titles):
+                    examples += ", …"
+                examples += ")"
+
+            logger.info(
+                "Normalization discards — %s: %d%s",
+                label,
+                count,
+                examples,
+                data={
+                    "discard_reason": reason,
+                    "count": count,
+                    "sample_titles": sample_titles,
+                    "discards": discards[:NORMALIZATION_DISCARD_JSONL_SAMPLE_SIZE],
+                    "discards_truncated": count
+                    > NORMALIZATION_DISCARD_JSONL_SAMPLE_SIZE,
+                },
+            )
+
+        logger.info(
+            "Normalization discard summary",
+            data={
+                "total_discarded": self.total,
+                "by_reason": {
+                    reason: len(entries)
+                    for reason, entries in sorted(self._by_reason.items())
+                },
+            },
+        )
 
 
 def normalize_venue_name(venue: str | None) -> str | None:
@@ -141,14 +229,24 @@ def _feed_quality_scores() -> dict[str, float]:
     return {feed.id: feed.source_quality_score for feed in load_feed_configs()}
 
 
+def _candidate_discard_data(candidate: EventCandidate, **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "title": candidate.title,
+        "source_feed": candidate.source_feed,
+        "url": candidate.url,
+    }
+    payload.update(extra)
+    return payload
+
+
 def normalize_candidate(
     candidate: EventCandidate,
     *,
     run_id: str,
     feed_quality_scores: dict[str, float],
     now: datetime | None = None,
-) -> NormalizedEvent | None:
-    """Normalize a single candidate or return ``None`` when it should be discarded."""
+) -> NormalizationResult:
+    """Normalize a single candidate or return a discard reason when filtered."""
     reference = (now or _utc_now()).astimezone(timezone.utc)
     default_dt = reference.replace(hour=12, minute=0, second=0, microsecond=0)
 
@@ -158,17 +256,41 @@ def normalize_candidate(
         default=default_dt,
     )
     if start_datetime is None:
-        return None
+        return NormalizationResult(
+            None,
+            discard_reason=DISCARD_UNPARSEABLE_DATE,
+            discard_data=_candidate_discard_data(
+                candidate,
+                date=candidate.date,
+                time=candidate.time,
+            ),
+        )
 
     if not is_within_normalization_window(start_datetime, now=reference):
-        return None
+        return NormalizationResult(
+            None,
+            discard_reason=DISCARD_OUTSIDE_WINDOW,
+            discard_data=_candidate_discard_data(
+                candidate,
+                date=candidate.date,
+                time=candidate.time,
+            ),
+        )
 
     normalized_venue = normalize_venue_name(candidate.venue)
     if normalized_venue is None:
-        return None
+        return NormalizationResult(
+            None,
+            discard_reason=DISCARD_MISSING_VENUE,
+            discard_data=_candidate_discard_data(candidate),
+        )
 
     if not is_valid_url(candidate.url):
-        return None
+        return NormalizationResult(
+            None,
+            discard_reason=DISCARD_INVALID_URL,
+            discard_data=_candidate_discard_data(candidate),
+        )
 
     id_date = candidate.date or start_datetime.strftime("%Y-%m-%d")
     event_id = compute_normalized_event_id(
@@ -181,7 +303,7 @@ def normalize_candidate(
     description = candidate.description or candidate.title
     source_quality_score = feed_quality_scores.get(candidate.source_feed, 0.5)
 
-    return NormalizedEvent(
+    event = NormalizedEvent(
         id=event_id,
         title=candidate.title.strip(),
         start_datetime=start_datetime,
@@ -200,6 +322,7 @@ def normalize_candidate(
         run_id=run_id,
         normalized_at=reference,
     )
+    return NormalizationResult(event)
 
 
 async def run(candidates: list[EventCandidate], run_id: str) -> list[NormalizedEvent]:
@@ -220,91 +343,48 @@ async def run(candidates: list[EventCandidate], run_id: str) -> list[NormalizedE
     logger = get_logger("event_normalization", run_id=run_id)
     feed_quality_scores = _feed_quality_scores()
     normalized_events: list[NormalizedEvent] = []
+    discards = NormalizationDiscardCollector()
     reference = _utc_now()
 
     for candidate in candidates:
         try:
-            event = normalize_candidate(
+            result = normalize_candidate(
                 candidate,
                 run_id=run_id,
                 feed_quality_scores=feed_quality_scores,
                 now=reference,
             )
         except Exception as exc:
-            logger.warning(
-                "Skipping candidate due to normalization error: %s",
-                candidate.title,
-                data={
-                    "source_feed": candidate.source_feed,
-                    "url": candidate.url,
-                    "error": str(exc),
-                },
+            discards.record(
+                DISCARD_NORMALIZATION_ERROR,
+                _candidate_discard_data(candidate, error=str(exc)),
             )
             continue
 
-        if event is None:
-            if (
-                parse_event_datetime(
-                    candidate.date,
-                    candidate.time,
-                    default=reference.replace(
-                        hour=12, minute=0, second=0, microsecond=0
-                    ),
-                )
-                is None
-            ):
-                logger.warning(
-                    "Discarding candidate with unparseable date: %s",
-                    candidate.title,
-                    data={
-                        "source_feed": candidate.source_feed,
-                        "date": candidate.date,
-                        "time": candidate.time,
-                    },
-                )
-            elif normalize_venue_name(candidate.venue) is None:
-                logger.warning(
-                    "Discarding candidate with missing venue: %s",
-                    candidate.title,
-                    data={"source_feed": candidate.source_feed},
-                )
-            elif not is_valid_url(candidate.url):
-                logger.warning(
-                    "Discarding candidate with invalid URL: %s",
-                    candidate.title,
-                    data={
-                        "source_feed": candidate.source_feed,
-                        "url": candidate.url,
-                    },
-                )
-            else:
-                logger.info(
-                    "Discarding candidate outside normalization window: %s",
-                    candidate.title,
-                    data={
-                        "source_feed": candidate.source_feed,
-                        "date": candidate.date,
-                        "time": candidate.time,
-                    },
-                )
+        if result.event is None:
+            if result.discard_reason and result.discard_data:
+                discards.record(result.discard_reason, result.discard_data)
             continue
 
-        normalized_events.append(event)
+        normalized_events.append(result.event)
         logger.debug(
             "Normalized event: %s",
-            event.title,
+            result.event.title,
             data={
-                "event_id": event.id,
+                "event_id": result.event.id,
                 "source_feed": candidate.source_feed,
-                "start_datetime": event.start_datetime.isoformat(),
+                "start_datetime": result.event.start_datetime.isoformat(),
             },
         )
+
+    discards.emit(logger)
 
     logger.info(
         "Event normalization complete",
         data={
             "candidates_processed": len(candidates),
             "events_returned": len(normalized_events),
+            "discarded": discards.total,
         },
     )
     return normalized_events

@@ -105,14 +105,15 @@ def test_normalize_candidate_populates_source_fields_and_stable_id() -> None:
     candidate = _candidate()
     feed_scores = {SANDLOT_FEED: 0.75}
 
-    event = event_normalization.normalize_candidate(
+    result = event_normalization.normalize_candidate(
         candidate,
         run_id=TEST_RUN_ID,
         feed_quality_scores=feed_scores,
         now=REFERENCE_NOW,
     )
 
-    assert event is not None
+    assert result.event is not None
+    event = result.event
     assert event.id == compute_normalized_event_id(
         EVENT_TITLE,
         EVENT_DATE,
@@ -132,27 +133,29 @@ def test_normalize_candidate_populates_source_fields_and_stable_id() -> None:
 def test_normalize_candidate_discards_events_outside_seven_day_window() -> None:
     candidate = _candidate(date="Sat, Jun 20 2025", time="6:00 PM")
 
-    event = event_normalization.normalize_candidate(
+    result = event_normalization.normalize_candidate(
         candidate,
         run_id=TEST_RUN_ID,
         feed_quality_scores={SANDLOT_FEED: 0.75},
         now=REFERENCE_NOW,
     )
 
-    assert event is None
+    assert result.event is None
+    assert result.discard_reason == event_normalization.DISCARD_OUTSIDE_WINDOW
 
 
 def test_normalize_candidate_discards_events_in_the_past() -> None:
     candidate = _candidate(date="Sat, Jun 1 2025", time="6:00 PM")
 
-    event = event_normalization.normalize_candidate(
+    result = event_normalization.normalize_candidate(
         candidate,
         run_id=TEST_RUN_ID,
         feed_quality_scores={SANDLOT_FEED: 0.75},
         now=REFERENCE_NOW,
     )
 
-    assert event is None
+    assert result.event is None
+    assert result.discard_reason == event_normalization.DISCARD_OUTSIDE_WINDOW
 
 
 @pytest.mark.asyncio
@@ -173,7 +176,20 @@ async def test_run_discards_unparseable_dates_and_logs_warning(logs_dir) -> None
 
     assert results == []
     log_entries = _read_all_log_entries(logs_dir)
+    discard_logs = [
+        entry
+        for entry in log_entries
+        if entry["message"].startswith("Normalization discards —")
+    ]
+    assert len(discard_logs) == 1
+    assert discard_logs[0]["data"]["discard_reason"] == (
+        event_normalization.DISCARD_UNPARSEABLE_DATE
+    )
+    assert discard_logs[0]["data"]["count"] == 1
     assert any(
+        entry["message"] == "Normalization discard summary" for entry in log_entries
+    )
+    assert not any(
         entry["message"].startswith("Discarding candidate with unparseable date")
         for entry in log_entries
     )
@@ -205,6 +221,79 @@ async def test_run_returns_normalized_events_within_window() -> None:
 
     assert len(results) == 1
     assert results[0].title == EVENT_TITLE
+
+
+@pytest.mark.asyncio
+async def test_run_aggregates_discards_by_reason(logs_dir) -> None:
+    candidates = [
+        _candidate(title=f"Bad Date {index}", date="not-a-date", time="nope")
+        for index in range(3)
+    ] + [
+        _candidate(
+            title=f"No Venue {index}",
+            venue="  ",
+            url=f"https://example.com/no-venue-{index}",
+        )
+        for index in range(2)
+    ]
+
+    with (
+        patch(
+            "scene_scout.agents.event_normalization._utc_now",
+            return_value=REFERENCE_NOW,
+        ),
+        patch(
+            "scene_scout.agents.event_normalization._feed_quality_scores",
+            return_value={SANDLOT_FEED: 0.75},
+        ),
+    ):
+        results = await event_normalization.run(candidates, run_id=TEST_RUN_ID)
+
+    assert results == []
+    log_entries = _read_all_log_entries(logs_dir)
+    reason_logs = {
+        entry["data"]["discard_reason"]: entry
+        for entry in log_entries
+        if entry["message"].startswith("Normalization discards —")
+    }
+    unparseable = event_normalization.DISCARD_UNPARSEABLE_DATE
+    missing_venue = event_normalization.DISCARD_MISSING_VENUE
+    assert reason_logs[unparseable]["data"]["count"] == 3
+    assert reason_logs[missing_venue]["data"]["count"] == 2
+    assert len(reason_logs) == 2
+
+    summary = next(
+        entry
+        for entry in log_entries
+        if entry["message"] == "Normalization discard summary"
+    )
+    assert summary["data"]["total_discarded"] == 5
+
+
+def test_discard_collector_samples_titles_for_terminal_message() -> None:
+    collector = event_normalization.NormalizationDiscardCollector()
+    for index in range(7):
+        collector.record(
+            event_normalization.DISCARD_OUTSIDE_WINDOW,
+            {"title": f"Event {index}", "source_feed": SANDLOT_FEED},
+        )
+
+    messages: list[str] = []
+
+    class _CaptureLogger:
+        def info(self, message: str, *args, data=None) -> None:
+            formatted = message % args if args else message
+            messages.append(formatted)
+
+    collector.emit(_CaptureLogger())
+
+    assert messages[0].startswith(
+        "Normalization discards — outside normalization window: 7"
+    )
+    assert "Event 0" in messages[0]
+    assert "Event 4" in messages[0]
+    assert "Event 5" not in messages[0]
+    assert messages[1] == "Normalization discard summary"
 
 
 def _read_all_log_entries(logs_dir) -> list[dict[str, object]]:
