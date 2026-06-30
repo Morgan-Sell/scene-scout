@@ -174,6 +174,38 @@ uv run python -m scene_scout.cli uat --prompt "..." --dry-run --verbose
 UAT writes per-run output to `output/uat_{run_id}/summary.json` with stage counts
 (raw entries, cache hit rate, discards by reason, enriched events, etc.).
 
+### Tiered UAT
+
+Use the cheapest tier that answers your question. Full operator guide:
+[`docs/260629_uat_debug_plan.md` — UAT-D.7](docs/260629_uat_debug_plan.md).
+
+| Tier | Command | LLM | Typical use |
+|---|---|---|---|
+| **A** | `feed-probe` | No | Ingest health after feed/config changes |
+| **B** | `uat --dry-run --max-extraction N --feeds …` | Limited | Pipeline smoke (extract → normalize) |
+| **C** | `uat --dry-run` | Full | Pre-release integration; writes `email_preview.html` |
+| **D** | `uat` (no `--dry-run`) | Full + Resend | Release gate — email must arrive in inbox |
+
+```bash
+# Tier A — ingest only (~seconds)
+uv run python -m scene_scout.cli feed-probe
+
+# Tier B — limited smoke (optional: UAT_MAX_EXTRACTION env, --stop-after feeds|extract|…)
+uv run python -m scene_scout.cli uat \
+  --prompt "Live music and free NYC shows this week" \
+  --dry-run --max-extraction 25 --feeds brooklynvegan,theskint
+
+# Tier C — full integration, no send
+uv run python -m scene_scout.cli uat \
+  --prompt "Live music, free NYC shows, and creative community events this week" \
+  --dry-run
+```
+
+Key artifacts: `output/uat_{run_id}/summary.json` (funnel counts; `status: partial` on
+early stop or failure), `output/uat_{run_id}/email_preview.html` (Tier C/D),
+`vol-logs/{run_id}.jsonl` (structured agent logs). Clear `vol-cache/` when testing
+cold-start extraction behavior.
+
 ### Docker Compose
 
 ```bash
