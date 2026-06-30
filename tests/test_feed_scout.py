@@ -9,7 +9,7 @@ All HTTP responses are mocked via respx so tests run offline and
 deterministically. We test our logic, not feedparser or httpx.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,8 @@ from scene_scout.agents import feed_scout
 from scene_scout.config import load_feed_configs
 from scene_scout.models.feed import FeedConfig, FeedStatus
 from tests.conftest import TEST_RUN_ID
+
+_ICAL_REFERENCE_NOW = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -71,6 +73,16 @@ def _make_config(
         source_quality_score=0.8,
         active=True,
     )
+
+
+@pytest.fixture(autouse=True)
+def ical_reference_now(monkeypatch: pytest.MonkeyPatch) -> datetime:
+    """Anchor iCal window filtering so fixture dates stay in-window."""
+    monkeypatch.setattr(
+        "scene_scout.agents.sources.ical._utc_now",
+        lambda: _ICAL_REFERENCE_NOW,
+    )
+    return _ICAL_REFERENCE_NOW
 
 
 # ---------------------------------------------------------------------------
