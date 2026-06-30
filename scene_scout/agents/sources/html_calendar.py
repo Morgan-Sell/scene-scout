@@ -351,7 +351,7 @@ def _map_items_to_entries(
                 link=link,
                 description=description,
                 published_raw=published_raw,
-                categories=["music"] if config.id == "ohmyrockness_nyc" else [],
+                categories=[],
                 fetched_at=fetched_at,
             )
         )
