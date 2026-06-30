@@ -93,14 +93,14 @@ decisions below for the response strategy.
 
 ## Product decisions
 
-Follow-up decisions from funnel analysis (2026-06-29). These guide UAT-D.9–D.11 and
-supersede the LibCal pre-filter approach in UAT-D.5.
+Follow-up decisions from funnel analysis (2026-06-29). These guide UAT-D.5, UAT-D.9–D.11.
 
 ### A. Retire library calendar feeds
 
 - Deactivate `nypl_events` and `bpl_calendar` in `config/feeds.yaml` — they emit
   week/month-long class series, dominate LLM cost, and skew the funnel.
-- Do **not** invest in LibCal iCal pre-filtering (supersedes UAT-D.5).
+- Retire interim LibCal feeds (UAT-D.11); keep the iCal pre-filter (UAT-D.5) for any
+  `source_type: ical` source re-enabled or added later.
 - Replace with **independent NYC sources**: local newspapers, creative/community calendars
   (e.g. existing `dance_nyc` scrape target, Eventbrite when token ready, fixed
   `ohmyrockness_nyc`, additional RSS/scrape research).
@@ -241,17 +241,28 @@ Optional env: `UAT_MAX_EXTRACTION` for non-flag use.
 
 ### UAT-D.5 — iCal pre-filter before extraction
 
-**Priority:** ~~P2~~ **Superseded**
+**Priority:** P2 — reduces LLM waste from high-volume iCal sources.
 
-**Superseded by feed strategy (UAT-D.11).** Library iCal sources removed from active UAT
-feeds; pre-filtering LibCal volume is no longer a priority. Revisit only if a non-library
-iCal source is added later.
+**Problem:** iCal adapters (LibCal and other `.ics` subscriptions) can emit hundreds of
+VEVENTs, many outside the 7-day normalization window. Without a pre-filter, every
+cache-miss entry reaches extraction before normalization discards it.
 
-~~**Problem:** `bpl_calendar` and `nypl_events` use verified interim LibCal ICS URLs~~
+**Files:** `scene_scout/agents/sources/ical.py`, `tests/agents/test_ical_source.py`
 
-~~**Files:** `scene_scout/agents/sources/ical.py`, `tests/agents/test_ical_source.py`~~
+**Design (v1):**
+- Drop VEVENTs whose `DTSTART`/`DTEND` do not overlap `[now, now + NORMALIZATION_WINDOW_DAYS]`
+- `FeedHealthReport.entries_fetched` reflects post-filter count (what reaches extraction)
+- **RRULE expansion** is out of v1 scope — recurring series whose `DTSTART` is outside
+  the window are dropped even if a future occurrence would fall in-window
 
-~~**Done when:**~~ *(cancelled — see UAT-D.11)*
+**Done when:**
+- iCal adapter drops out-of-window VEVENTs before building `RawFeedEntry` rows
+- `feed-probe` entry counts drop for heavy iCal feeds without losing near-term events
+- Unit tests cover in-window keep, out-of-window drop, all-day overlap, and empty
+  post-filter calendar
+
+**Complements UAT-D.11:** library feeds are retired in config; the filter protects any
+future iCal source.
 
 ---
 
@@ -429,8 +440,9 @@ flowchart LR
   D4[UAT-D.4 abbrev flags]
   D6[UAT-D.6 log cap]
   D8[UAT-D.8 feed follow-ups]
-  D5[UAT-D.5 cancelled]
+  D5[UAT-D.5 iCal pre-filter]
   D1 --> D11
+  D11 --> D5
   D1 --> D9
   D9 --> D10
   D11 --> D8
@@ -441,14 +453,14 @@ flowchart LR
 
 1. **UAT-D.1** — unblock full pipeline completion (P0)
 2. **UAT-D.11** — deactivate library feeds (immediate funnel/cost win)
-3. **UAT-D.9** + **UAT-D.10** — date capture for independent listings (P1)
-4. **UAT-D.2** + **UAT-D.3** — observability and cheap ingest check (P1)
-5. **UAT-D.4** — abbreviated dry-run flags (P1)
-6. **UAT-D.6** — normalization log noise cap (P2)
-7. **UAT-D.8** — remaining feed config quality (P3)
+3. **UAT-D.5** — iCal pre-filter before extraction (P2; protects future iCal sources)
+4. **UAT-D.9** + **UAT-D.10** — date capture for independent listings (P1)
+5. **UAT-D.2** + **UAT-D.3** — observability and cheap ingest check (P1)
+6. **UAT-D.4** — abbreviated dry-run flags (P1)
+7. **UAT-D.6** — normalization log noise cap (P2)
+8. **UAT-D.8** — remaining feed config quality (P3)
 
-UAT-D.5 is **cancelled** (superseded by UAT-D.11). UAT-D.7 is documentation only (this
-file); no code branch required.
+UAT-D.7 is documentation only (this file); no code branch required.
 
 ---
 

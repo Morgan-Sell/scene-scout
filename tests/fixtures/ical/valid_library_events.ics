@@ -6,8 +6,8 @@ METHOD:PUBLISH
 BEGIN:VEVENT
 UID:fixture-storytime-1
 DTSTAMP:20260601T120000Z
-DTSTART:20260715T150000Z
-DTEND:20260715T160000Z
+DTSTART:20260713T150000Z
+DTEND:20260713T160000Z
 SUMMARY:Sandlot Storytime
 DESCRIPTION:Weekly read-aloud for kids at the neighborhood library branch.
 URL:https://example.com/events/sandlot-storytime
@@ -18,7 +18,7 @@ END:VEVENT
 BEGIN:VEVENT
 UID:fixture-author-talk-2
 DTSTAMP:20260601T120000Z
-DTSTART;VALUE=DATE:20260720
+DTSTART;VALUE=DATE:20260715
 SUMMARY:Author Talk: The Beast
 DESCRIPTION:An evening with the author of the neighborhood baseball novel.
 URL:https://example.com/events/author-talk-beast
