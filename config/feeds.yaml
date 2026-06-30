@@ -3,11 +3,9 @@
 # Each feed entry defines an event source and its metadata.
 # source_type: rss (default) | ical | api | scrape — selects the ingestion adapter.
 # source_quality_score: 0.0–1.0. Higher = more reliable event data.
-# active: Set to false to disable without deleting the entry.
+# Only working event sources belong here — remove entries that cannot ingest.
 
 feeds:
-  # --- Active NYC sources ---
-
   - id: brooklynvegan
     name: BrooklynVegan
     url: https://www.brooklynvegan.com/feed/
@@ -24,170 +22,32 @@ feeds:
     active: true
     notes: "Free and cheap NYC events. Curated weekly listings."
 
-  # --- NYC sources pending RSS support (HTML calendars / broken feeds) ---
-
-  - id: brooklynvegan_todo
-    name: BrooklynVegan — To Do / NYC shows
-    url: https://www.brooklynvegan.com/category/to-do/feed/
+  - id: brooklyn_rail
+    name: Brooklyn Rail Events
+    url: https://brooklynrail.org/events
     city: New York
-    source_quality_score: 0.90
-    active: false
-    notes: "PENDING: Feed URL returns 404 HTML (category page exists but /feed/ is dead)."
-
-  - id: dance_nyc
-    name: Dance/NYC Community Calendar
-    url: https://www.dance.nyc/calendar/
-    city: New York
-    source_quality_score: 0.75
+    source_quality_score: 0.80
     source_type: scrape
-    active: false
+    active: true
     scrape:
       strategy: css
-      item_selector: div.event
-      title_selector: h3
+      item_selector: 'div[class*="events_card"]'
+      title_selector: h2
       link_selector: a
-      description_selector: p
-      date_selector: div.event_time
     notes: >
-      HTML-only community calendar (CSS scrape). Enable when selectors are
-      verified against live markup; prefer json_api/json_embed if XHR endpoints
-      are discovered.
+      Readings, panels, and creative community events. CSS scrape verified Jun 2026.
 
-  - id: ohmyrockness_nyc
-    name: Oh My Rockness NYC
-    url: https://www.ohmyrockness.com/shows
+  - id: harlem_one_stop
+    name: Harlem One Stop
+    url: https://www.harlemonestop.org/
     city: New York
-    source_quality_score: 0.85
+    source_quality_score: 0.80
     source_type: scrape
     active: true
     scrape:
-      strategy: json_api
-      discover_json_url: true
-      require_csrf: true
-      json_items_path: shows
-      field_map:
-        title: bands
-        link: url
-        published_raw: starts_at
-        description: venue.name
+      strategy: css
+      item_selector: 'div.tile:has(a[href^="/event/"])'
+      title_selector: a
+      link_selector: a
     notes: >
-      Uses Oh My Rockness embedded XHR endpoint (/api/shows.json) discovered from
-      the shows page. CSRF token required.
-
-  - id: nypl_events
-    name: NYPL Events
-    url: https://midhudson.libcal.com/ical_subscribe.php?src=p&cid=20549
-    city: New York
-    source_quality_score: 0.80
-    source_type: ical
-    active: true
-    notes: >
-      Discovery (Jun 2026): nypl.org/events/calendar has no public ICS feed.
-      Using Mid-Hudson Library System LibCal ICS (verified LibCal subscription
-      URL with live events) until NYPL publishes an official endpoint.
-
-  - id: bpl_calendar
-    name: Brooklyn Public Library Calendar
-    url: https://greenburghlibrary.libcal.com/ical_subscribe.php?src=p&cid=7925
-    city: New York
-    source_quality_score: 0.75
-    source_type: ical
-    active: true
-    notes: >
-      Discovery (Jun 2026): bklynlibrary.org/calendar has no public ICS feed.
-      Using Greenburgh Public Library LibCal ICS (verified NYC-metro LibCal
-      subscription URL with live events) until BPL publishes an official endpoint.
-
-  - id: bpl_presents
-    name: BPL Presents
-    url: https://www.bklynlibrary.org/bpl-presents
-    city: New York
-    source_quality_score: 0.80
-    active: false
-    notes: "PENDING: HTML landing page; no RSS feed available."
-
-  - id: eventbrite_nyc
-    name: Eventbrite NYC
-    url: eventbrite://events/search
-    city: New York
-    source_quality_score: 0.70
-    source_type: api
-    active: false
-    cursor: "1"
-    notes: >
-      Eventbrite event search for New York (50 km radius). Set EVENTBRITE_API_TOKEN
-      in .env and active: true to enable. cursor is the 1-based start page.
-
-  # --- Retired LA-area sources ---
-
-  - id: latimes_local
-    name: LA Times Local
-    url: https://www.latimes.com/local/rss2.0.xml
-    city: Los Angeles
-    source_quality_score: 0.80
-    active: false
-    notes: "RETIRED: Switched pipeline to NYC feeds."
-
-  - id: lamag
-    name: LA Magazine
-    url: https://www.lamag.com/feed/
-    city: Los Angeles
-    source_quality_score: 0.75
-    active: false
-    notes: "RETIRED: Switched pipeline to NYC feeds."
-
-  - id: laconservancy
-    name: LA Conservancy
-    url: https://www.laconservancy.org/feed/
-    city: Los Angeles
-    source_quality_score: 0.85
-    active: false
-    notes: "RETIRED: Switched pipeline to NYC feeds."
-
-  - id: zocalo
-    name: Zócalo Public Square
-    url: https://www.zocalopublicsquare.org/feed/
-    city: Los Angeles
-    source_quality_score: 0.70
-    active: false
-    notes: "RETIRED: Switched pipeline to NYC feeds."
-
-  - id: la_weekly_events
-    name: LA Weekly Events
-    url: https://www.laweekly.com/tag/events/feed/
-    city: Los Angeles
-    source_quality_score: 0.75
-    active: false
-    notes: "RETIRED: Feed responds but returns zero items."
-
-  - id: the_shed_dtla
-    name: The Broad Museum Events
-    url: https://www.thebroad.org/rss.xml
-    city: Los Angeles
-    source_quality_score: 0.85
-    active: false
-    notes: "RETIRED: /rss.xml returns 404 HTML error page."
-
-  - id: dublab
-    name: dublab
-    url: https://dublab.com/feed/
-    city: Los Angeles
-    source_quality_score: 0.80
-    active: false
-    notes: "RETIRED: Site migrated; feed URL returns 404 HTML."
-
-  - id: kcrw_events
-    name: KCRW Events
-    url: https://www.kcrw.com/music/shows/feed.xml
-    city: Los Angeles
-    source_quality_score: 0.80
-    active: false
-    notes: "RETIRED: Feed URL unplugged (404)."
-
-  - id: kcet_arts
-    name: KCET Arts & Culture
-    url: https://www.kcet.org/shows/artbound/feed
-    city: Los Angeles
-    source_quality_score: 0.70
-    active: false
-    notes: "RETIRED: Artbound feed returns 404."
+      Harlem cultural events calendar. One row per event on homepage tiles.

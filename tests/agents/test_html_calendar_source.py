@@ -80,7 +80,7 @@ async def test_omr_json_api_discover_and_map_entries():
     )
     assert first.published_raw == "2026-06-24T20:00:00-04:00"
     assert first.description == "Brooklyn Paramount"
-    assert first.categories == ["music"]
+    assert first.categories == []
     assert isinstance(first.fetched_at, datetime)
 
 

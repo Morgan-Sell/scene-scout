@@ -352,16 +352,41 @@ uv run python -m scene_scout.cli uat \
 **Priority:** P3 — data quality; separate from pipeline bugs. Track as small PRs after
 UAT-D.1 lands. Feed retirement details in UAT-D.11.
 
-| Feed | Issue | Action |
+**Status:** Implemented in `config/feeds.yaml` (Jun 2026). Removed broken NY feeds
+(LibCal libraries, OMR, Dance/NYC, BPL). Added creative-community sources; two scrape
+feeds active after live verification.
+
+| Feed | Issue | Decision |
 |---|---|---|
-| `nypl_events`, `bpl_calendar` | Interim LibCal URLs; week/month class series skew funnel | **`active: false`** — retired from UAT (UAT-D.11); not representative of target product |
-| `brooklynvegan`, `theskint` | Many extraction LLM calls return `is_event=False` (editorial RSS) | Keep; core independent listings |
-| `ohmyrockness_nyc` | Live `/api/shows.json` returns `401 HTTP Token: Access denied` | Fix auth or set `active: false` until fixed |
-| `dance_nyc` | CSS scrape template; `active: false` | Enable after live selector verification — creative community |
-| `eventbrite_nyc` | Requires `EVENTBRITE_API_TOKEN`; `active: false` | Enable when token configured |
-| *(research)* | Need more independent NYC sources | Evaluate live RSS/scrape for newspapers and culture listings (e.g. Gothamist, Time Out, Hyperallergic, Village Voice — verify before adding) |
+| `brooklynvegan`, `theskint` | Many extraction LLM calls return `is_event=False` (editorial RSS) | **Keep active** — core independent listings |
+| `brooklyn_rail`, `harlem_one_stop` | CSS scrape verified Jun 2026 | **Active** — creative community |
+| Pending sources (BAC, Artforum, Nonsense NYC, West Harlem Arts, Eventbrite) | No working ingest yet | **Not in config** — research table only |
+| LibCal / OMR / BPL / Dance/NYC (removed) | Class-series skew, 401 API, dead feeds | **Deleted from config** |
+
+**Tier B/C default feed set:** `brooklynvegan,theskint` (+ `brooklyn_rail,harlem_one_stop` when running full creative-community ingest).
 
 **Done when:** Decisions recorded; config/adapter changes merged independently of UAT-D.1–D.4.
+
+#### UAT-D.8 source research (Jun 2026)
+
+SceneScout targets **distinct events** (shows, openings, readings), not long-duration
+class series or semester workshops.
+
+| Source | Config id | Status | Notes |
+|---|---|---|---|
+| Brooklyn Rail | `brooklyn_rail` | **In config** | 32 events via CSS scrape |
+| Harlem One Stop | `harlem_one_stop` | **In config** | Homepage event tiles |
+| Brooklyn Arts Council | — | Not in config | Squarespace client-side render |
+| Artforum Artguide | — | Not in config | PMC client-rendered calendar |
+| Nonsense NYC | — | Not in config | Newsletter/site; no event feed |
+| West Harlem Arts Alliance | — | Not in config | `/feed/` returns HTML not RSS |
+| Eventbrite NYC | — | Not in config | Requires API token + adapter |
+| Artscards | — | Skip | Domain for sale |
+| Gothamist / Hyperallergic / Village Voice | — | Not added | Editorial RSS, not event calendars |
+| Time Out NYC | — | Not added | things-to-do `/feed` 404 |
+
+**Minimum before next Tier C UAT:** evaluate ≥2 new independent sources via `feed-probe`
+(see UAT-D.11). `brooklyn_rail` and `harlem_one_stop` satisfy this when active.
 
 ---
 
@@ -417,12 +442,15 @@ noise without matching SceneScout's independent listings product direction.
 
 **Files:** `config/feeds.yaml`, optional footnote in `docs/project_plan.md`
 
+**Status:** Config retirement merged with UAT-D.8 (Jun 2026). LibCal feeds removed from
+`config/feeds.yaml` (not deactivated — deleted).
+
 **Done when:**
-- `nypl_events` and `bpl_calendar` set `active: false` with notes explaining retirement
-- Tier B/C default feed set documented as `brooklynvegan,theskint` (+ others when healthy)
-- Replacement source research checklist recorded (minimum 2 new independent feeds evaluated
-  via `feed-probe` before next full Tier C UAT)
-- Cold-start UAT raw-entry count drops from ~650 to ~50–100 (order-of-magnitude
+- [x] `nypl_events` and `bpl_calendar` removed from config (UAT-D.11)
+- [x] Tier B/C default feed set documented as `brooklynvegan,theskint` (+ scrape feeds when healthy)
+- [x] Replacement source research checklist recorded (UAT-D.8 research table)
+- [x] Minimum 2 new independent feeds evaluated via `feed-probe` (`brooklyn_rail`, `harlem_one_stop`)
+- [ ] Cold-start UAT raw-entry count drops from ~650 to ~50–100 (order-of-magnitude
   expectation, not a hard gate)
 
 ---
