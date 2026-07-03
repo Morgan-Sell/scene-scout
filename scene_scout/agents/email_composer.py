@@ -137,10 +137,14 @@ def build_event_blocks(recommendations: list[CuratedRecommendation]) -> str:
     blocks: list[str] = []
     for recommendation in recommendations:
         event = recommendation.event
+        when_label = _format_event_datetime(
+            event.start_datetime,
+            event.end_datetime,
+        )
         lines = [
             f"Event {recommendation.rank}:",
             f"  Title: {event.title}",
-            f"  When: {_format_event_datetime(event.start_datetime, event.end_datetime)}",
+            f"  When: {when_label}",
             f"  Venue: {event.venue}",
             f"  City: {event.city}",
         ]
@@ -209,6 +213,10 @@ def render_html_email(
             base_url=tracking_base_url,
         )
         price = _format_price(is_free=event.is_free, price_cents=event.price_cents)
+        when_label = _format_event_datetime(
+            event.start_datetime,
+            event.end_datetime,
+        )
 
         sections.extend(
             [
@@ -217,9 +225,11 @@ def render_html_email(
                 f"<h2>{recommendation.rank}. "
                 f'<a href="{html.escape(track_url, quote=True)}">'
                 f"{html.escape(event.title)}</a></h2>",
-                f"<p><strong>{html.escape(_format_event_datetime(event.start_datetime, event.end_datetime))}"
-                f"</strong> · {html.escape(event.venue)} · "
-                f"{html.escape(event.city)}</p>",
+                (
+                    f"<p><strong>{html.escape(when_label)}</strong> · "
+                    f"{html.escape(event.venue)} · "
+                    f"{html.escape(event.city)}</p>"
+                ),
             ]
         )
         if price:

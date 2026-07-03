@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from scene_scout.agents import event_normalization
-from scene_scout.normalization_config import MAX_RECURRING_OCCURRENCES
 from scene_scout.models.event import EventCandidate, compute_normalized_event_id
+from scene_scout.normalization_config import MAX_RECURRING_OCCURRENCES
 from tests.conftest import TEST_RUN_ID
 
 SANDLOT_FEED = "sandlot-pickup-league"
@@ -237,6 +237,10 @@ async def test_run_flattens_recurring_occurrences() -> None:
         results = await event_normalization.run([candidate], run_id=TEST_RUN_ID)
 
     assert len(results) == 3
+
+
+@pytest.mark.asyncio
+async def test_run_logs_debug_when_time_dropped() -> None:
     candidate = _candidate(
         date="2026-07-07",
         time="9:00 am – 1:00 pm",
