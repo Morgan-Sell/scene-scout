@@ -92,10 +92,14 @@ merged to `main` after Phase 7.7.
 **Done when:**
 - iCal adapter fetches `.ics` URLs and maps `VEVENT` fields to `RawFeedEntry` (title,
   link, description, `published_raw` from DTSTART)
-- At least two NYC library calendars configured and active (NYPL, BPL — discover and
-  verify working ICS endpoints; update `feeds.yaml` from current `PENDING` HTML URLs)
 - Unit tests with fixture `.ics` files; health report on unreachable/malformed ICS
-- UAT `feed_health` shows non-zero entries from iCal sources
+- UAT `feed_health` shows non-zero entries from iCal sources when configured
+
+**UAT-D.11 footnote (Jul 2026):** Interim NYPL/BPL LibCal feeds were removed from
+`config/feeds.yaml` — they dominated ingest with class-series noise and are not the
+product direction. Re-add only when official public ICS endpoints exist. Active NYC
+sources are independent listings (`brooklynvegan`, `theskint`, `brooklyn_rail`,
+`harlem_one_stop`). See [UAT-D.11](260629_uat_debug_plan.md).
 
 ### 1B.3 — Event API Connector
 **Files:** `scene_scout/agents/sources/event_api.py`, `scene_scout/config.py`,
@@ -834,7 +838,7 @@ invoke). Does not send email or call LLM providers.
 | Multi-source ingestion (adapter interface) | Planned — after Phase 7.7 | 1B |
 | `global_feeds.yaml` / `user_feeds.yaml` split | Aspirational — v1 uses single `config/feeds.yaml` | 1B or 10 |
 | Event API platform (Eventbrite vs Songkick) | Open — decide in 1B.3 | 1B.3 |
-| iCal library calendars (NYPL, BPL) | Planned — pending ICS URL discovery | 1B.2 |
+| iCal library calendars (NYPL, BPL) | Retired in UAT-D.11 — pending official ICS endpoints | 1B.2 |
 | HTML calendar scrapers | Deferred — per-site, after 1B.1–1B.3 | 1B.4 |
 
 ---

@@ -97,9 +97,9 @@ Follow-up decisions from funnel analysis (2026-06-29). These guide UAT-D.5, UAT-
 
 ### A. Retire library calendar feeds
 
-- Deactivate `nypl_events` and `bpl_calendar` in `config/feeds.yaml` — they emit
-  week/month-long class series, dominate LLM cost, and skew the funnel.
-- Retire interim LibCal feeds (UAT-D.11); keep the iCal pre-filter (UAT-D.5) for any
+- Remove `nypl_events` and `bpl_calendar` from `config/feeds.yaml` — they emitted
+  week/month-long class series, dominated LLM cost, and skewed the funnel.
+- Retired in UAT-D.11 (deleted, not deactivated); keep the iCal pre-filter (UAT-D.5) for any
   `source_type: ical` source re-enabled or added later.
 - Replace with **independent NYC sources**: local newspapers, creative/community calendars
   (e.g. existing `dance_nyc` scrape target, Eventbrite when token ready, fixed
@@ -446,16 +446,18 @@ noise without matching SceneScout's independent listings product direction.
 
 **Files:** `config/feeds.yaml`, optional footnote in `docs/project_plan.md`
 
-**Status:** Config retirement merged with UAT-D.8 (Jun 2026). LibCal feeds removed from
-`config/feeds.yaml` (not deactivated — deleted).
+**Status:** Implemented (Jul 2026). LibCal feeds deleted in UAT-D.8; independent sources
+expanded in the same pass. Cold-start `feed-probe` (cache cleared): **62 raw entries**
+from 4 active feeds (2026-07-03) — within the ~50–100 order-of-magnitude target.
+
+**Active feeds:** `brooklynvegan`, `theskint`, `brooklyn_rail`, `harlem_one_stop`
 
 **Done when:**
 - [x] `nypl_events` and `bpl_calendar` removed from config (UAT-D.11)
 - [x] Tier B/C default feed set documented as `brooklynvegan,theskint` (+ scrape feeds when healthy)
 - [x] Replacement source research checklist recorded (UAT-D.8 research table)
 - [x] Minimum 2 new independent feeds evaluated via `feed-probe` (`brooklyn_rail`, `harlem_one_stop`)
-- [ ] Cold-start UAT raw-entry count drops from ~650 to ~50–100 (order-of-magnitude
-  expectation, not a hard gate)
+- [x] Cold-start UAT raw-entry count drops from ~650 to ~50–100 (measured **62** via `feed-probe`)
 
 ---
 

@@ -4,6 +4,8 @@
 # source_type: rss (default) | ical | api | scrape — selects the ingestion adapter.
 # source_quality_score: 0.0–1.0. Higher = more reliable event data.
 # Only working event sources belong here — remove entries that cannot ingest.
+# Active set (UAT-D.11): brooklynvegan, theskint, brooklyn_rail, harlem_one_stop.
+# Tier B/C smoke default: brooklynvegan,theskint (see docs/260629_uat_debug_plan.md).
 
 feeds:
   - id: brooklynvegan
