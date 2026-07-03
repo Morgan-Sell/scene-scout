@@ -107,6 +107,35 @@ def _rec(**overrides: object) -> CuratedRecommendation:
     return CuratedRecommendation.model_validate(payload)
 
 
+def test_format_event_datetime_renders_span_when_end_datetime_set() -> None:
+    start = datetime(2026, 6, 27, 19, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 28, 23, 59, tzinfo=timezone.utc)
+
+    formatted = email_composer._format_event_datetime(start, end)
+
+    assert "Jun 27" in formatted
+    assert "Jun 28" in formatted
+    assert "–" in formatted
+
+
+def test_render_html_includes_festival_date_span() -> None:
+    start = datetime(2026, 6, 27, 19, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 28, 23, 59, tzinfo=timezone.utc)
+    event = _event(start_datetime=start, end_datetime=end)
+    recommendation = _rec(event=event)
+    html_body = email_composer.render_html_email(
+        recommendations=[recommendation],
+        intro_paragraph="Here are your picks.",
+        event_descriptions=["A two-night festival."],
+        curator_name="Allegra",
+        user_name="Morgan",
+        tracking_base_url=TRACKING_BASE,
+    )
+
+    assert "Jun 27" in html_body
+    assert "Jun 28" in html_body
+
+
 def test_build_subject_prefixes_uat_run_id() -> None:
     subject = email_composer.build_subject("20260612-120000", user_name="Morgan")
 

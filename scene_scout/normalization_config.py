@@ -1,6 +1,7 @@
 """Normalization policy constants for SceneScout."""
 
 NORMALIZATION_WINDOW_DAYS = 7
+MAX_RECURRING_OCCURRENCES = 5
 
 # Aggregated discard logging (UAT-D.6).
 NORMALIZATION_DISCARD_TERMINAL_SAMPLE_SIZE = 5

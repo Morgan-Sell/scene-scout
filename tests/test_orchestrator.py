@@ -387,6 +387,53 @@ def test_store_seen_entries_after_partial_normalization(cache_db: Path) -> None:
         assert cache.get_seen_entry(SANDLOT_FEED_ID, entry_hash) is not None
 
 
+def test_store_seen_entries_maps_recurring_occurrences_to_one_source(
+    cache_db: Path,
+) -> None:
+    """UAT-D.10: multiple normalized rows from one candidate share source mapping."""
+    cache = CacheService(run_id=TEST_RUN_ID, db_path=cache_db)
+    source_entry = _raw_entry(link="https://example.com/recurring-series")
+    candidate = _event_candidate()
+    candidate = EventCandidate.from_llm_output(
+        EventCandidateLLMOutput.model_validate(
+            {
+                "title": "Weekly Jazz Jam",
+                "date": "July 2, July 3, July 4",
+                "time": "8:00 PM",
+                "venue": "The Sandlot",
+                "city": "New York",
+                "url": "https://example.com/recurring-series",
+                "is_event": True,
+                "extraction_confidence": 0.9,
+            }
+        ),
+        source_feed=SANDLOT_FEED_ID,
+        run_id=TEST_RUN_ID,
+        extracted_at=datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc),
+    )
+    normalized_events = [
+        _normalized_event(
+            id=f"occurrence-{day}",
+            title="Weekly Jazz Jam",
+            url="https://example.com/recurring-series",
+            start_datetime=datetime(2026, 7, day, 20, 0, tzinfo=timezone.utc),
+        )
+        for day in (2, 3, 4)
+    ]
+
+    _store_seen_entries_after_normalization(
+        cache,
+        [candidate],
+        normalized_events,
+        [source_entry],
+    )
+
+    entry_hash = compute_entry_hash(source_entry)
+    cached = cache.get_seen_entry(SANDLOT_FEED_ID, entry_hash)
+    assert cached is not None
+    assert cached.id == "occurrence-4"
+
+
 @pytest.mark.asyncio
 async def test_orchestrator_run_returns_zero_counts(pipeline_state_dir: Path) -> None:
     result = await Orchestrator().run(SANDLOT_PROMPT)

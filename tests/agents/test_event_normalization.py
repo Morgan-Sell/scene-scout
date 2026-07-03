@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from scene_scout.agents import event_normalization
+from scene_scout.normalization_config import MAX_RECURRING_OCCURRENCES
 from scene_scout.models.event import EventCandidate, compute_normalized_event_id
 from tests.conftest import TEST_RUN_ID
 
@@ -157,8 +158,85 @@ def test_normalize_candidate_accepts_time_range_with_date_only_fallback() -> Non
     assert result.event.start_datetime.hour == 12
 
 
+def test_normalize_festival_range_sets_end_datetime() -> None:
+    cases = (
+        ("June 27-28", datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc)),
+        ("August 28 & 29", datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)),
+    )
+    for date, reference in cases:
+        result = event_normalization.normalize_candidate(
+            _candidate(date=date, time="7:00 PM", city="New York"),
+            run_id=TEST_RUN_ID,
+            feed_quality_scores={SANDLOT_FEED: 0.75},
+            now=reference,
+        )
+        assert len(result.events) == 1
+        event = result.events[0]
+        assert event.end_datetime is not None
+        assert event.end_datetime.date() > event.start_datetime.date()
+
+
+def test_normalize_recurring_list_emits_distinct_in_window_rows() -> None:
+    result = event_normalization.normalize_candidate(
+        _candidate(date="July 2, July 3, July 4", time="8:00 PM", city="New York"),
+        run_id=TEST_RUN_ID,
+        feed_quality_scores={SANDLOT_FEED: 0.75},
+        now=JULY_REFERENCE_NOW,
+    )
+
+    assert len(result.events) == 3
+    assert len({event.id for event in result.events}) == 3
+    assert [event.start_datetime.day for event in result.events] == [2, 3, 4]
+
+
+def test_normalize_recurring_list_caps_at_max_occurrences() -> None:
+    dates = ", ".join(f"July {day}" for day in range(2, 9))
+    result = event_normalization.normalize_candidate(
+        _candidate(date=dates, city="New York"),
+        run_id=TEST_RUN_ID,
+        feed_quality_scores={SANDLOT_FEED: 0.75},
+        now=JULY_REFERENCE_NOW,
+    )
+
+    assert len(result.events) == MAX_RECURRING_OCCURRENCES
+
+
+def test_normalize_weekday_series_only_emits_in_window_tuesdays() -> None:
+    result = event_normalization.normalize_candidate(
+        _candidate(
+            date="Tuesdays, July 7 through September 15",
+            time=None,
+            city="New York",
+        ),
+        run_id=TEST_RUN_ID,
+        feed_quality_scores={SANDLOT_FEED: 0.75},
+        now=datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(result.events) == 2
+    assert [event.start_datetime.day for event in result.events] == [7, 14]
+
+
 @pytest.mark.asyncio
-async def test_run_logs_debug_when_time_dropped() -> None:
+async def test_run_flattens_recurring_occurrences() -> None:
+    candidate = _candidate(
+        date="July 2, July 3, July 4",
+        city="New York",
+    )
+
+    with (
+        patch(
+            "scene_scout.agents.event_normalization._utc_now",
+            return_value=JULY_REFERENCE_NOW,
+        ),
+        patch(
+            "scene_scout.agents.event_normalization._feed_quality_scores",
+            return_value={SANDLOT_FEED: 0.75},
+        ),
+    ):
+        results = await event_normalization.run([candidate], run_id=TEST_RUN_ID)
+
+    assert len(results) == 3
     candidate = _candidate(
         date="2026-07-07",
         time="9:00 am – 1:00 pm",
