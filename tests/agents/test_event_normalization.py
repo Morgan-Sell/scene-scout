@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -86,13 +86,116 @@ def test_parse_event_datetime_handles_edge_case_strings(
     default = REFERENCE_NOW.replace(hour=12, minute=0, second=0, microsecond=0)
     parsed = event_normalization.parse_event_datetime(date, time, default=default)
 
-    assert parsed is not None
-    assert parsed.day == expected_day
-    assert parsed.tzinfo is not None
+    assert parsed.value is not None
+    assert parsed.value.day == expected_day
+    assert parsed.value.tzinfo is not None
+    assert parsed.time_dropped is False
 
 
 def test_parse_event_datetime_returns_none_for_unparseable_input() -> None:
-    assert event_normalization.parse_event_datetime("not a date", "also bad") is None
+    result = event_normalization.parse_event_datetime("not a date", "also bad")
+    assert result.value is None
+    assert result.time_dropped is False
+
+
+JULY_REFERENCE_NOW = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize(
+    ("date", "time", "expected_day"),
+    [
+        ("2026-07-07", "9:00 am – 1:00 pm", 7),
+        ("2026-07-25", "1:00 to 2:00 PM", 25),
+    ],
+)
+def test_parse_event_datetime_falls_back_to_date_only_for_time_ranges(
+    date: str,
+    time: str,
+    expected_day: int,
+) -> None:
+    default = JULY_REFERENCE_NOW.replace(hour=12, minute=0, second=0, microsecond=0)
+    parsed = event_normalization.parse_event_datetime(date, time, default=default)
+
+    assert parsed.value is not None
+    assert parsed.time_dropped is True
+    assert parsed.value.day == expected_day
+    assert parsed.value.hour == 12
+    assert parsed.value.minute == 0
+
+
+def test_parse_event_datetime_prefers_combined_parse_for_unambiguous_times() -> None:
+    default = REFERENCE_NOW.replace(hour=12, minute=0, second=0, microsecond=0)
+    parsed = event_normalization.parse_event_datetime(
+        "Sat, Jun 7 2025",
+        "6:00 PM",
+        default=default,
+    )
+
+    assert parsed.value is not None
+    assert parsed.time_dropped is False
+    assert parsed.value.day == 7
+    assert parsed.value.hour == 18
+
+
+def test_normalize_candidate_accepts_time_range_with_date_only_fallback() -> None:
+    candidate = _candidate(
+        date="2026-07-07",
+        time="9:00 am – 1:00 pm",
+        city="New York",
+    )
+
+    result = event_normalization.normalize_candidate(
+        candidate,
+        run_id=TEST_RUN_ID,
+        feed_quality_scores={SANDLOT_FEED: 0.75},
+        now=JULY_REFERENCE_NOW,
+    )
+
+    assert result.event is not None
+    assert result.time_dropped is True
+    assert result.event.start_datetime.day == 7
+    assert result.event.start_datetime.hour == 12
+
+
+@pytest.mark.asyncio
+async def test_run_logs_debug_when_time_dropped() -> None:
+    candidate = _candidate(
+        date="2026-07-07",
+        time="9:00 am – 1:00 pm",
+        city="New York",
+    )
+    logger = MagicMock()
+
+    with (
+        patch(
+            "scene_scout.agents.event_normalization._utc_now",
+            return_value=JULY_REFERENCE_NOW,
+        ),
+        patch(
+            "scene_scout.agents.event_normalization._feed_quality_scores",
+            return_value={SANDLOT_FEED: 0.75},
+        ),
+        patch(
+            "scene_scout.agents.event_normalization.get_logger",
+            return_value=logger,
+        ),
+    ):
+        results = await event_normalization.run([candidate], run_id=TEST_RUN_ID)
+
+    assert len(results) == 1
+    time_drop_calls = [
+        call
+        for call in logger.debug.call_args_list
+        if call.args
+        and call.args[0] == "Dropped unparseable time; using date-only fallback"
+    ]
+    assert len(time_drop_calls) == 1
+    assert time_drop_calls[0].kwargs["data"]["time"] == "9:00 am – 1:00 pm"
+    assert not any(
+        call.args[0].startswith("Normalization discards —")
+        for call in logger.info.call_args_list
+        if call.args
+    )
 
 
 def test_parse_price_handles_free_and_dollar_amounts() -> None:
