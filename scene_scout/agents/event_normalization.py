@@ -63,12 +63,21 @@ def _utc_now() -> datetime:
 
 
 @dataclass(frozen=True)
+class ParsedEventDatetime:
+    """Result of parsing candidate date/time strings."""
+
+    value: datetime | None
+    time_dropped: bool = False
+
+
+@dataclass(frozen=True)
 class NormalizationResult:
     """Outcome of normalizing a single candidate."""
 
     event: NormalizedEvent | None
     discard_reason: str | None = None
     discard_data: dict[str, Any] | None = None
+    time_dropped: bool = False
 
 
 class NormalizationDiscardCollector:
@@ -173,26 +182,55 @@ def is_valid_url(url: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def parse_event_datetime(
-    date: str | None,
-    time: str | None,
+def _try_parse_datetime(
+    value: str,
     *,
     default: datetime | None = None,
 ) -> datetime | None:
-    """Parse candidate date/time strings via ``dateutil``."""
-    parts = [part.strip() for part in (date, time) if part and part.strip()]
-    if not parts:
-        return None
-
-    combined = " ".join(parts)
+    """Parse a single date/time string via ``dateutil``."""
     try:
-        parsed = date_parser.parse(combined, default=default)
+        parsed = date_parser.parse(value.strip(), default=default)
     except (ValueError, OverflowError, TypeError):
         return None
 
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def parse_event_datetime(
+    date: str | None,
+    time: str | None,
+    *,
+    default: datetime | None = None,
+) -> ParsedEventDatetime:
+    """Parse candidate date/time strings via ``dateutil``.
+
+    When ``date + time`` fails (e.g. duration-style ranges), falls back to
+    date-only parsing using ``default`` (noon UTC in normalization).
+    """
+    date_part = date.strip() if date else ""
+    time_part = time.strip() if time else ""
+    if not date_part and not time_part:
+        return ParsedEventDatetime(None)
+
+    parts = [part for part in (date_part, time_part) if part]
+    combined = " ".join(parts)
+    parsed = _try_parse_datetime(combined, default=default)
+    if parsed is not None:
+        return ParsedEventDatetime(parsed)
+
+    if date_part and time_part:
+        date_only = _try_parse_datetime(date_part, default=default)
+        if date_only is not None:
+            return ParsedEventDatetime(date_only, time_dropped=True)
+
+    if date_part:
+        date_only = _try_parse_datetime(date_part, default=default)
+        if date_only is not None:
+            return ParsedEventDatetime(date_only)
+
+    return ParsedEventDatetime(None)
 
 
 def parse_price(price: str | None) -> tuple[int | None, bool]:
@@ -250,12 +288,12 @@ def normalize_candidate(
     reference = (now or _utc_now()).astimezone(timezone.utc)
     default_dt = reference.replace(hour=12, minute=0, second=0, microsecond=0)
 
-    start_datetime = parse_event_datetime(
+    parse_result = parse_event_datetime(
         candidate.date,
         candidate.time,
         default=default_dt,
     )
-    if start_datetime is None:
+    if parse_result.value is None:
         return NormalizationResult(
             None,
             discard_reason=DISCARD_UNPARSEABLE_DATE,
@@ -265,6 +303,8 @@ def normalize_candidate(
                 time=candidate.time,
             ),
         )
+
+    start_datetime = parse_result.value
 
     if not is_within_normalization_window(start_datetime, now=reference):
         return NormalizationResult(
@@ -322,7 +362,7 @@ def normalize_candidate(
         run_id=run_id,
         normalized_at=reference,
     )
-    return NormalizationResult(event)
+    return NormalizationResult(event, time_dropped=parse_result.time_dropped)
 
 
 async def run(candidates: list[EventCandidate], run_id: str) -> list[NormalizedEvent]:
@@ -365,6 +405,18 @@ async def run(candidates: list[EventCandidate], run_id: str) -> list[NormalizedE
             if result.discard_reason and result.discard_data:
                 discards.record(result.discard_reason, result.discard_data)
             continue
+
+        if result.time_dropped:
+            logger.debug(
+                "Dropped unparseable time; using date-only fallback",
+                data={
+                    "title": candidate.title,
+                    "source_feed": candidate.source_feed,
+                    "date": candidate.date,
+                    "time": candidate.time,
+                    "start_datetime": result.event.start_datetime.isoformat(),
+                },
+            )
 
         normalized_events.append(result.event)
         logger.debug(

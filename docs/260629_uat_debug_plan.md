@@ -399,11 +399,13 @@ class series or semester workshops.
 
 **Files:** `scene_scout/agents/event_normalization.py`, `tests/agents/test_event_normalization.py`
 
+**Status:** Implemented (Jul 2026).
+
 **Done when:**
-- `2026-07-07` + `9:00 am – 1:00 pm` normalizes using date-only fallback
-- `2026-07-25` + `1:00 to 2:00 PM` normalizes using date-only fallback
-- Combined parse still preferred when unambiguous (`Sat, Jun 7 2025` + `6:00 PM` unchanged)
-- Log at debug when time is dropped, not warning-discard
+- [x] `2026-07-07` + `9:00 am – 1:00 pm` normalizes using date-only fallback
+- [x] `2026-07-25` + `1:00 to 2:00 PM` normalizes using date-only fallback
+- [x] Combined parse still preferred when unambiguous (`Sat, Jun 7 2025` + `6:00 PM` unchanged)
+- [x] Log at debug when time is dropped, not warning-discard
 
 ---
 
