@@ -420,17 +420,19 @@ class series or semester workshops.
 `scene_scout/orchestrator.py` (1→N mapping for `seen_entries` + stage counts),
 `tests/agents/test_event_normalization.py`
 
+**Status:** Implemented (Jul 2026).
+
 **Done when:**
-- Festival examples (`August 28 & 29`, `June 27-28`) → one event with `end_datetime`
-- Recurring list (`July 2, July 9, July 15`) with reference `now` in window → up to 3
+- [x] Festival examples (`August 28 & 29`, `June 27-28`) → one event with `end_datetime`
+- [x] Recurring list (`July 2, July 9, July 15`) with reference `now` in window → up to 3
   distinct normalized rows
-- Weekday series (`Tuesdays, July 7 through September 15`) → only weekday instances
+- [x] Weekday series (`Tuesdays, July 7 through September 15`) → only weekday instances
   intersecting 7-day window, max 5
-- `MAX_RECURRING_OCCURRENCES = 5` exported from `normalization_config.py`
-- `run()` returns flattened list; orchestrator `_store_seen_entries_after_normalization`
+- [x] `MAX_RECURRING_OCCURRENCES = 5` exported from `normalization_config.py`
+- [x] `run()` returns flattened list; orchestrator `_store_seen_entries_after_normalization`
   maps each occurrence back to source `(feed_id, entry_hash)` without zip length mismatch
   (pairs with UAT-D.1 fix)
-- Email composer renders date span or single date when `end_datetime` set (verify existing
+- [x] Email composer renders date span or single date when `end_datetime` set (verify existing
   template handles it)
 
 ---

@@ -113,9 +113,23 @@ def _format_price(*, is_free: bool, price_cents: int | None) -> str | None:
     return f"${price_cents / 100:.2f}"
 
 
-def _format_event_datetime(start_datetime: datetime) -> str:
-    localized = start_datetime.astimezone(timezone.utc)
-    return localized.strftime("%a, %b %d · %I:%M %p UTC").replace(" 0", " ")
+def _format_event_datetime(
+    start_datetime: datetime,
+    end_datetime: datetime | None = None,
+) -> str:
+    localized_start = start_datetime.astimezone(timezone.utc)
+    start_label = localized_start.strftime("%a, %b %d · %I:%M %p UTC").replace(
+        " 0", " "
+    )
+    if end_datetime is None:
+        return start_label
+
+    localized_end = end_datetime.astimezone(timezone.utc)
+    if localized_end.date() == localized_start.date():
+        return start_label
+
+    end_label = localized_end.strftime("%a, %b %d · %I:%M %p UTC").replace(" 0", " ")
+    return f"{start_label} – {end_label}"
 
 
 def build_event_blocks(recommendations: list[CuratedRecommendation]) -> str:
@@ -123,10 +137,14 @@ def build_event_blocks(recommendations: list[CuratedRecommendation]) -> str:
     blocks: list[str] = []
     for recommendation in recommendations:
         event = recommendation.event
+        when_label = _format_event_datetime(
+            event.start_datetime,
+            event.end_datetime,
+        )
         lines = [
             f"Event {recommendation.rank}:",
             f"  Title: {event.title}",
-            f"  When: {_format_event_datetime(event.start_datetime)}",
+            f"  When: {when_label}",
             f"  Venue: {event.venue}",
             f"  City: {event.city}",
         ]
@@ -195,6 +213,10 @@ def render_html_email(
             base_url=tracking_base_url,
         )
         price = _format_price(is_free=event.is_free, price_cents=event.price_cents)
+        when_label = _format_event_datetime(
+            event.start_datetime,
+            event.end_datetime,
+        )
 
         sections.extend(
             [
@@ -203,9 +225,11 @@ def render_html_email(
                 f"<h2>{recommendation.rank}. "
                 f'<a href="{html.escape(track_url, quote=True)}">'
                 f"{html.escape(event.title)}</a></h2>",
-                f"<p><strong>{html.escape(_format_event_datetime(event.start_datetime))}"
-                f"</strong> · {html.escape(event.venue)} · "
-                f"{html.escape(event.city)}</p>",
+                (
+                    f"<p><strong>{html.escape(when_label)}</strong> · "
+                    f"{html.escape(event.venue)} · "
+                    f"{html.escape(event.city)}</p>"
+                ),
             ]
         )
         if price:
