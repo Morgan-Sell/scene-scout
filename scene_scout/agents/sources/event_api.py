@@ -58,13 +58,19 @@ class EventApiSourceAdapter:
         platform = _detect_platform(config.url)
         if platform == "eventbrite":
             if cache_hooks.client is not None:
-                return await _fetch_eventbrite(config, cache_hooks.client, run_id)
+                return await _fetch_eventbrite(
+                    config,
+                    cache_hooks.client,
+                    run_id,
+                    cache_hooks,
+                )
             async with httpx.AsyncClient(
                 timeout=_FETCH_TIMEOUT_SECONDS,
                 follow_redirects=True,
                 headers={"User-Agent": _USER_AGENT},
             ) as client:
-                return await _fetch_eventbrite(config, client, run_id)
+                hooks = CacheHooks(client=client, home_city=cache_hooks.home_city)
+                return await _fetch_eventbrite(config, client, run_id, hooks)
 
         return _unsupported_platform(config, platform)
 
@@ -73,6 +79,7 @@ async def _fetch_eventbrite(
     config: FeedConfig,
     client: httpx.AsyncClient,
     run_id: str,
+    cache_hooks: CacheHooks,
 ) -> tuple[list[RawFeedEntry], FeedHealthReport]:
     """Fetch Eventbrite search results for the feed's city."""
     fetched_at = datetime.now(timezone.utc)
@@ -86,7 +93,7 @@ async def _fetch_eventbrite(
         )
 
     start_page = _parse_cursor(config.cursor)
-    params = _eventbrite_search_params(config)
+    params = _eventbrite_search_params(_geo_city_for_api(config, cache_hooks))
     headers = {"Authorization": f"Bearer {token}"}
 
     all_events: list[dict[str, Any]] = []
@@ -204,16 +211,23 @@ def _map_eventbrite_event(
     )
 
 
-def _eventbrite_search_params(config: FeedConfig) -> dict[str, str]:
-    """Build Eventbrite search query parameters from feed config."""
-    geo = _CITY_SEARCH_PARAMS.get(config.city)
+def _geo_city_for_api(config: FeedConfig, cache_hooks: CacheHooks) -> str:
+    """Resolve the metro name used for API geo search parameters."""
+    if config.is_national and cache_hooks.home_city and cache_hooks.home_city.strip():
+        return cache_hooks.home_city.strip()
+    return config.city
+
+
+def _eventbrite_search_params(geo_city: str) -> dict[str, str]:
+    """Build Eventbrite search query parameters from a metro name."""
+    geo = _CITY_SEARCH_PARAMS.get(geo_city)
     if geo is None:
         logger.warning(
             "No predefined geo params for city %r; using city name as address",
-            config.city,
+            geo_city,
         )
         return {
-            "location.address": config.city,
+            "location.address": geo_city,
             "location.within": "50km",
             "expand": "organizer,category,venue",
         }

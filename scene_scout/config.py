@@ -65,12 +65,29 @@ def vol_feedback_dir() -> Path:
     return _vol_dir("VOL_FEEDBACK_DIR", "vol-feedback")
 
 
-def load_feed_configs(path: Path = _FEEDS_CONFIG_PATH) -> list[FeedConfig]:
+def filter_feed_configs_for_home_city(
+    configs: list[FeedConfig],
+    home_city: str,
+) -> list[FeedConfig]:
+    """Return metro feeds for ``home_city`` plus all national feeds."""
+    metro = home_city.strip()
+    return [config for config in configs if config.is_national or config.city == metro]
+
+
+def load_feed_configs(
+    path: Path = _FEEDS_CONFIG_PATH,
+    *,
+    home_city: str | None = None,
+) -> list[FeedConfig]:
     """
     Load and validate feed configurations from feeds.yaml.
 
-    Returns only active feeds. Raises on malformed config so failures
-    are loud at startup rather than silent during a pipeline run.
+    Returns only active feeds. When ``home_city`` is set, returns metro feeds
+    whose ``city`` matches plus all feeds with ``is_national: true``. When
+    ``home_city`` is ``None``, returns every active feed (operator scripts).
+
+    Raises on malformed config so failures are loud at startup rather than
+    silent during a pipeline run.
     """
     if not path.exists():
         raise FileNotFoundError(f"Feed config not found at: {path}")
@@ -84,7 +101,9 @@ def load_feed_configs(path: Path = _FEEDS_CONFIG_PATH) -> list[FeedConfig]:
     configs = [FeedConfig(**entry) for entry in raw["feeds"]]
     active = [c for c in configs if c.active]
 
-    return active
+    if home_city is None:
+        return active
+    return filter_feed_configs_for_home_city(active, home_city)
 
 
 def is_dry_run() -> bool:

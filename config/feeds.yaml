@@ -3,6 +3,9 @@
 # Each feed entry defines an event source and its metadata.
 # source_type: rss (default) | ical | api | scrape — selects the ingestion adapter.
 # source_quality_score: 0.0–1.0. Higher = more reliable event data.
+# city: metro tag for local feeds; matched against UserProfile.home_city at ingest.
+# is_national: true — always included for every user; national API adapters query
+#   using profile.home_city (not feed.city). Use for Ticketmaster, Eventbrite, etc.
 # Only working event sources belong here — remove entries that cannot ingest.
 # Tier B/C smoke default: brooklynvegan,theskint (see docs/260629_uat_debug_plan.md).
 
@@ -44,6 +47,7 @@ feeds:
     name: Eventbrite NYC
     url: eventbrite://events/search
     city: New York
+    is_national: true
     source_quality_score: 0.70
     source_type: api
     active: true
