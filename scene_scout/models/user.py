@@ -8,10 +8,17 @@ and consumed by Ranking, the Recommendation Curator, and Email Composer.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from scene_scout.vibe_classifier_config import VIBE_VOCABULARY
+
+HORIZON_DAYS_MIN = 1
+HORIZON_DAYS_MAX = 60
+DEFAULT_HORIZON_DAYS = 14
+LEGACY_DEFAULT_HOME_CITY = "New York"
+LEGACY_DEFAULT_HORIZON_DAYS = 7
 
 
 def _validate_category_weights_dict(value: dict[str, float]) -> dict[str, float]:
@@ -68,6 +75,8 @@ class UserProfile(BaseModel):
     user_id: str
     name: str
     email: str
+    home_city: str
+    horizon_days: int = Field(ge=HORIZON_DAYS_MIN, le=HORIZON_DAYS_MAX)
     stated_interests: list[str] = Field(default_factory=list)
     stated_dislikes: list[str] = Field(default_factory=list)
     preferred_neighborhoods: list[str] = Field(default_factory=list)
@@ -79,6 +88,25 @@ class UserProfile(BaseModel):
     created_at: datetime
     last_updated: datetime
     profile_version: int = 1
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_legacy_defaults(cls, data: Any) -> Any:
+        """Backfill city/horizon for profiles saved before Phase 1C.1."""
+        if isinstance(data, dict):
+            payload = dict(data)
+            payload.setdefault("home_city", LEGACY_DEFAULT_HOME_CITY)
+            payload.setdefault("horizon_days", LEGACY_DEFAULT_HORIZON_DAYS)
+            return payload
+        return data
+
+    @field_validator("home_city")
+    @classmethod
+    def _validate_home_city(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("home_city must be non-empty")
+        return cleaned
 
     @field_validator("category_weights")
     @classmethod

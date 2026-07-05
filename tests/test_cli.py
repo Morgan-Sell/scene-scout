@@ -25,6 +25,7 @@ from scene_scout.cli import (
 )
 from scene_scout.logging.logger import _logger_cache
 from scene_scout.models.feed import FeedHealthReport, FeedStatus
+from scene_scout.models.user import HORIZON_DAYS_MAX
 from scene_scout.orchestrator import PipelineResult, PipelineRunError
 from scene_scout.orchestrator_config import UatRunOptions
 from scene_scout.uat_artifacts import write_summary_json
@@ -103,6 +104,50 @@ def test_build_parser_uat_abbreviated_flags() -> None:
     assert args.max_extraction == 25
     assert args.feeds == "brooklynvegan,theskint"
     assert args.stop_after == "extract"
+
+
+def test_build_parser_uat_city_and_horizon_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "uat",
+            "--prompt",
+            SANDLOT_PROMPT,
+            "--city",
+            "New York",
+            "--horizon-days",
+            "21",
+        ]
+    )
+
+    assert args.city == "New York"
+    assert args.horizon_days == 21
+
+
+def test_build_uat_run_options_resolves_city_and_horizon(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UAT_HOME_CITY", "Chicago")
+    monkeypatch.setenv("UAT_HORIZON_DAYS", "30")
+    options = build_uat_run_options()
+    assert options.home_city == "Chicago"
+    assert options.horizon_days == 30
+
+
+def test_build_uat_run_options_cli_overrides_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UAT_HOME_CITY", "Chicago")
+    monkeypatch.setenv("UAT_HORIZON_DAYS", "30")
+    options = build_uat_run_options(home_city="Boston", horizon_days=7)
+    assert options.home_city == "Boston"
+    assert options.horizon_days == 7
+
+
+def test_main_uat_rejects_invalid_horizon_days() -> None:
+    exit_code = main(
+        ["uat", "--prompt", "test", "--horizon-days", str(HORIZON_DAYS_MAX + 1)]
+    )
+    assert exit_code == 1
 
 
 def test_build_uat_run_options_resolves_env_max_extraction(

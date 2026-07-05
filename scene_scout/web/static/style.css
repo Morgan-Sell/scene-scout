@@ -151,6 +151,14 @@ label {
   color: var(--cognac);
 }
 
+.field-hint {
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 300;
+  color: var(--smoke);
+  letter-spacing: 0.02em;
+}
+
 input,
 textarea {
   width: 100%;

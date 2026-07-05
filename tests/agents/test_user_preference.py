@@ -75,6 +75,8 @@ async def test_parse_cold_start_writes_profile_json(profiles_dir: Path) -> None:
             email="Morgan@Example.com",
             prompt="I love jazz and outdoor concerts in Silver Lake.",
             run_id=TEST_RUN_ID,
+            home_city="Los Angeles",
+            horizon_days=14,
         )
 
     profile_path = profiles_dir / "profile.json"
@@ -83,6 +85,8 @@ async def test_parse_cold_start_writes_profile_json(profiles_dir: Path) -> None:
     loaded = UserProfile.model_validate_json(profile_path.read_text(encoding="utf-8"))
     assert loaded.name == "Morgan"
     assert loaded.email == "Morgan@Example.com"
+    assert loaded.home_city == "Los Angeles"
+    assert loaded.horizon_days == 14
     assert loaded.stated_interests == ["jazz", "outdoor"]
     assert loaded.vibe_preferences == ["intimate", "outdoor"]
     assert loaded.profile_version == 1
@@ -100,6 +104,8 @@ async def test_parse_cold_start_calls_llm_complete(profiles_dir: Path) -> None:
             email="morgan@example.com",
             prompt="Jazz and outdoor events only.",
             run_id=TEST_RUN_ID,
+            home_city="Los Angeles",
+            horizon_days=21,
         )
 
     mock_complete.assert_awaited_once()
@@ -155,6 +161,8 @@ async def test_parse_cold_start_propagates_infrastructure_error(
                 email="morgan@example.com",
                 prompt="Jazz only.",
                 run_id=TEST_RUN_ID,
+                home_city="New York",
+                horizon_days=14,
             )
 
 
@@ -172,4 +180,6 @@ async def test_parse_cold_start_propagates_validation_error(
                 email="morgan@example.com",
                 prompt="Jazz only.",
                 run_id=TEST_RUN_ID,
+                home_city="New York",
+                horizon_days=14,
             )

@@ -30,6 +30,8 @@ from scene_scout.orchestrator import Orchestrator, PipelineResult, PipelineRunEr
 from scene_scout.orchestrator_config import (
     UatRunOptions,
     parse_feed_ids,
+    resolve_uat_home_city,
+    resolve_uat_horizon_days,
     resolve_uat_max_extraction,
 )
 from scene_scout.services.cache import CacheService
@@ -328,12 +330,16 @@ def build_uat_run_options(
     max_extraction: int | None = None,
     feeds: str | None = None,
     stop_after: str | None = None,
+    home_city: str | None = None,
+    horizon_days: int | None = None,
 ) -> UatRunOptions:
     """Build orchestrator UAT limits from CLI flags and env."""
     return UatRunOptions(
         feed_ids=parse_feed_ids(feeds),
         max_extraction=resolve_uat_max_extraction(max_extraction),
         stop_after=stop_after,  # type: ignore[arg-type]
+        home_city=resolve_uat_home_city(home_city),
+        horizon_days=resolve_uat_horizon_days(horizon_days),
     )
 
 
@@ -352,6 +358,8 @@ async def run_uat(
     max_extraction: int | None = None,
     feeds: str | None = None,
     stop_after: str | None = None,
+    home_city: str | None = None,
+    horizon_days: int | None = None,
 ) -> PipelineResult:
     """Execute a UAT pipeline run.
 
@@ -385,6 +393,8 @@ async def run_uat(
         max_extraction=max_extraction,
         feeds=feeds,
         stop_after=stop_after,
+        home_city=home_city,
+        horizon_days=horizon_days,
     )
 
     logger = get_logger("orchestrator")
@@ -396,6 +406,8 @@ async def run_uat(
             "feeds": sorted(uat_options.feed_ids) if uat_options.feed_ids else None,
             "max_extraction": uat_options.max_extraction,
             "stop_after": uat_options.stop_after,
+            "home_city": uat_options.home_city,
+            "horizon_days": uat_options.horizon_days,
         },
     )
 
@@ -496,6 +508,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Stop after the given pipeline stage and write a partial summary",
     )
+    uat_parser.add_argument(
+        "--city",
+        default=None,
+        help="Home city when no persisted profile exists (UAT_HOME_CITY env fallback)",
+    )
+    uat_parser.add_argument(
+        "--horizon-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Days ahead to search when no persisted profile exists "
+            "(1–60; UAT_HORIZON_DAYS env fallback)"
+        ),
+    )
 
     feed_probe_parser = subparsers.add_parser(
         "feed-probe",
@@ -541,6 +568,8 @@ def main(argv: list[str] | None = None) -> int:
                     max_extraction=args.max_extraction,
                     feeds=args.feeds,
                     stop_after=args.stop_after,
+                    home_city=args.city,
+                    horizon_days=args.horizon_days,
                 )
             )
         except PipelineRunError:
