@@ -137,6 +137,15 @@ without removing agents or Neighborhood Scout.*
 
 **Branching:** One feature branch per subphase (e.g. `feat/1c-1-profile-city-horizon`).
 
+**Feed scoping model (1C.2–1C.3):** Each entry in `config/feeds.yaml` keeps a `city`
+string (metro tag for local sources). National mainstream APIs (e.g. Ticketmaster,
+Eventbrite when enabled) add `is_national: true` — they are **always** included in
+ingest regardless of `UserProfile.home_city`. Metro feeds (`is_national: false`, the
+default) are included only when `feed.city` matches `profile.home_city`. For
+`is_national` API feeds, adapters must query using **`profile.home_city`** (via a metro
+→ API geo mapping), not the static `feed.city` on the config row. Do not use
+`city: "National"` as a filter sentinel; use the boolean.
+
 ### 1C.1 — UserProfile city and horizon (backend + onboarding UI)
 **Files:**
 `scene_scout/models/user.py`,
@@ -188,24 +197,57 @@ from the UI (and stored on `UserProfile`).
 - [ ] `docker-compose up` + manual smoke: complete onboarding in browser; reload Profile tab
   and confirm city/horizon visible
 
-### 1C.2 — City-scoped feed loading
-**Files:** `scene_scout/config.py`, `scene_scout/orchestrator.py`, `config/feeds.yaml`
-(or `config/metro_feeds.yaml` if split), tests
+### 1C.2 — City-scoped feed loading (and national feeds)
+**Files:**
+`scene_scout/models/feed.py`,
+`scene_scout/config.py`,
+`scene_scout/orchestrator.py`,
+`scene_scout/agents/feed_scout.py`,
+`scene_scout/agents/sources/event_api.py` (and future national API adapters),
+`scene_scout/cli.py` (`feed-probe`),
+`config/feeds.yaml` (document `is_national` in header),
+tests
+
+**Context:** 1C.1 stores `home_city` on the profile. This subphase connects that field
+to **which feeds run** and **what city national APIs query**. Two responsibilities:
+
+1. **Filter (load time)** — include an active feed when `feed.is_national` **or**
+   `feed.city == profile.home_city`.
+2. **Fetch (adapter time)** — when `feed.is_national` and `source_type == api`, pass
+   `profile.home_city` into platform geo/search params (extend `_CITY_SEARCH_PARAMS` or
+   equivalent); metro-local RSS/scrape feeds continue to use `feed.city` for metadata only.
+
+**Backend:**
+- `FeedConfig` gains `is_national: bool = False`
+- `load_feed_configs(home_city: str | None = None)` — when `home_city` is set, return
+  active feeds matching the union rule above; when `None`, preserve today’s “all active
+  feeds” behavior for backward-compatible operator scripts
+- Orchestrator passes `profile.home_city` into `load_feed_configs()` before
+  `feed_scout.run()`, and passes the same `home_city` into `feed_scout.run()` for adapters
+- `feed-probe` supports optional `--city` using the same filter as the orchestrator
+
 **Done when:**
-- `load_feed_configs()` accepts optional `city: str | None`; when set, returns only
-  active feeds whose `FeedConfig.city` matches
-- Orchestrator passes `profile.home_city` into feed loading before `feed_scout.run()`
-- `feed-probe` supports optional `--city` for operator checks
-- Unit test: mixed-city config returns correct subset
+- [ ] `FeedConfig.is_national` validated; documented in `feeds.yaml` header with examples
+- [ ] `load_feed_configs(home_city=...)` returns metro feeds for that city **plus** all
+  active `is_national` feeds
+- [ ] Orchestrator wires `profile.home_city` through load + `feed_scout.run()`
+- [ ] National API adapter(s) use `home_city` for geo/search params when `is_national`
+  (Eventbrite path updated even if feed remains inactive until 1C.3)
+- [ ] `feed-probe --city "New York"` exercises metro + national subset only
+- [ ] Unit tests: mixed metro + national config — NYC user gets NYC + national, not LA-only;
+  national feed included for any `home_city`
 
 ### 1C.3 — Mainstream metro feed catalog
 **Files:** `config/feeds.yaml`, `.env.example`, docs cross-links
 **Done when:**
 - Feed catalog reflects redesign: structured mainstream sources per metro (e.g. DoNYC +
-  multiple API slots); indie/editorial RSS and fragile scrapes removed or `active: false`
+  metro-local listings); indie/editorial RSS and fragile scrapes removed or `active: false`
+- National platform slots (Ticketmaster, Eventbrite when a working endpoint exists) use
+  `is_national: true`; metro scrapes/RSS keep `is_national: false` with `city` set to
+  the metro name (e.g. `New York`)
 - Eventbrite search feed inactive until a working API endpoint is configured
-- `feed-probe` for default metro returns non-zero entries from ≥2 independent sources
-- Notes in config header point to `260705_product_redesign.md`
+- `feed-probe --city` for default metro returns non-zero entries from ≥2 independent sources
+- Notes in config header point to `260705_product_redesign.md` and the `is_national` rule
 
 ### 1C.4 — Structured ingest bypass (skip extraction LLM)
 **Files:** `scene_scout/orchestrator.py`, source adapters (`event_api.py`, `ical.py`, optional
@@ -956,9 +998,10 @@ invoke). Does not send email or call LLM providers.
 | HTML calendar scrapers | Deferred — per-site, after 1B.1–1B.3 | 1B.4 |
 | Product redesign (mainstream + personalization) | Active — see [`260705_product_redesign.md`](260705_product_redesign.md) | 1C |
 | `UserProfile.home_city` / `horizon_days` | Planned | 1C.1 |
-| City-scoped feed catalog | Planned | 1C.2 |
+| `FeedConfig.is_national` + city-scoped load | Planned — metro match **or** always-on national feeds; APIs query `home_city` | 1C.2 |
+| Mainstream metro + national feed catalog | Planned | 1C.3 |
 | Structured ingest bypass (skip extraction LLM) | Planned | 1C.4 |
-| Eventbrite search API | Inactive — endpoint 404; org/partner API TBD | 1C.3 |
+| Eventbrite search API | Inactive — endpoint 404; org/partner API TBD; use `is_national: true` when enabled | 1C.3 |
 
 ---
 
