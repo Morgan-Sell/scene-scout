@@ -66,7 +66,8 @@ degrade gracefully; infrastructure failures fail fast.
 | Evaluation | Post-send quality report | Planned (Phase 9) |
 
 Full specs: [`docs/architecture.md`](docs/architecture.md). Milestone plan:
-[`docs/project_plan.md`](docs/project_plan.md).
+[`docs/project_plan.md`](docs/project_plan.md). Product direction (Jul 2026):
+[`docs/260705_product_redesign.md`](docs/260705_product_redesign.md).
 
 ## Platform services
 

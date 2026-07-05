@@ -119,6 +119,43 @@ async def test_css_scrape_maps_event_blocks():
 
 
 @respx.mock
+async def test_css_scrape_uses_datetime_attribute_when_date_text_empty():
+    config = _make_config(
+        url="https://donyc.com/events",
+        feed_id="donyc",
+        scrape=ScrapeConfig(
+            strategy="css",
+            item_selector="div.event-card",
+            title_selector="span.title",
+            link_selector="a",
+            description_selector="span.venue",
+            date_selector='meta[itemprop="startDate"]',
+        ),
+    )
+    html = """
+    <div class="event-card">
+      <a href="/events/sample">Link</a>
+      <span class="title">Sample Show</span>
+      <span class="venue">Sony Hall</span>
+      <meta itemprop="startDate" content="2026-07-02T20:00-0400">
+    </div>
+    """
+    respx.get(config.url).mock(return_value=Response(200, text=html))
+
+    entries, report = await HtmlCalendarSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(),
+    )
+
+    assert report.succeeded is True
+    assert len(entries) == 1
+    assert entries[0].title == "Sample Show"
+    assert entries[0].description == "Sony Hall"
+    assert entries[0].published_raw == "2026-07-02T20:00-0400"
+
+
+@respx.mock
 async def test_missing_scrape_config_returns_unreachable():
     config = FeedConfig(
         id="scrape_test",
