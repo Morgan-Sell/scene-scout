@@ -23,6 +23,7 @@ class CacheHooks:
     client: Optional[httpx.AsyncClient] = None
     get_feed_etag: Optional[GetFeedEtagFn] = None
     store_feed_etag: Optional[StoreFeedEtagFn] = None
+    home_city: Optional[str] = None
 
 
 class SourceAdapter(Protocol):

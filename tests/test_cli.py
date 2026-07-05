@@ -74,6 +74,16 @@ def reset_loggers() -> None:
     _logger_cache.clear()
 
 
+def test_build_parser_feed_probe_city_flag() -> None:
+    args = build_parser().parse_args(
+        ["feed-probe", "--city", "New York", "--allow-failures"]
+    )
+
+    assert args.command == "feed-probe"
+    assert args.city == "New York"
+    assert args.allow_failures is True
+
+
 def test_build_parser_uat_subcommand() -> None:
     args = build_parser().parse_args(
         ["uat", "--prompt", SANDLOT_PROMPT, "--dry-run", "--verbose"]
@@ -233,7 +243,10 @@ async def test_run_feed_probe_returns_nonzero_when_no_active_feeds(
     output_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("scene_scout.cli.load_feed_configs", lambda: [])
+    monkeypatch.setattr(
+        "scene_scout.cli.load_feed_configs",
+        lambda *args, **kwargs: [],
+    )
     monkeypatch.setattr(
         "scene_scout.cli.feed_scout.run",
         AsyncMock(return_value=([], [])),
@@ -258,7 +271,7 @@ async def test_run_feed_probe_writes_json_and_returns_zero_on_success(
     reports = [_feed_health_report()]
     monkeypatch.setattr(
         "scene_scout.cli.load_feed_configs",
-        lambda: [object()],
+        lambda *args, **kwargs: [object()],
     )
     monkeypatch.setattr(
         "scene_scout.cli.feed_scout.run",
@@ -291,7 +304,10 @@ async def test_run_feed_probe_returns_nonzero_when_feed_unhealthy(
             error_message="HTTP 401",
         )
     ]
-    monkeypatch.setattr("scene_scout.cli.load_feed_configs", lambda: [object()])
+    monkeypatch.setattr(
+        "scene_scout.cli.load_feed_configs",
+        lambda *args, **kwargs: [object()],
+    )
     monkeypatch.setattr(
         "scene_scout.cli.feed_scout.run",
         AsyncMock(return_value=([], reports)),
@@ -319,7 +335,10 @@ async def test_run_feed_probe_allow_failures_returns_zero(
             error_message="bad xml",
         )
     ]
-    monkeypatch.setattr("scene_scout.cli.load_feed_configs", lambda: [object()])
+    monkeypatch.setattr(
+        "scene_scout.cli.load_feed_configs",
+        lambda *args, **kwargs: [object()],
+    )
     monkeypatch.setattr(
         "scene_scout.cli.feed_scout.run",
         AsyncMock(return_value=([], reports)),
@@ -348,7 +367,10 @@ def test_main_feed_probe_exits_nonzero_on_failed_feed(
     monkeypatch.setattr(
         "scene_scout.cli.feed_probe_run_id", lambda now=None: PROBE_RUN_ID
     )
-    monkeypatch.setattr("scene_scout.cli.load_feed_configs", lambda: [object()])
+    monkeypatch.setattr(
+        "scene_scout.cli.load_feed_configs",
+        lambda *args, **kwargs: [object()],
+    )
     monkeypatch.setattr(
         "scene_scout.cli.feed_scout.run",
         AsyncMock(return_value=([], reports)),

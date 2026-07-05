@@ -79,7 +79,11 @@ class FeedConfig(BaseModel):
     url : str
         Source URL (RSS feed, ICS calendar, API endpoint, or scrape target).
     city : str
-        City this feed covers. Used for location context.
+        Metro this feed covers when ``is_national`` is false; metadata only when
+        ``is_national`` is true (API geo uses ``profile.home_city`` at fetch time).
+    is_national : bool
+        When true, feed is included for every user metro. National API adapters
+        must query using the pipeline ``home_city``, not ``feed.city``.
     source_quality_score : float
         Feed reliability score from 0.0 to 1.0. Higher = more reliable event data.
         Defaults to 0.5 for user-added feeds until calibrated.
@@ -103,6 +107,7 @@ class FeedConfig(BaseModel):
     name: str
     url: str
     city: str
+    is_national: bool = False
     source_quality_score: float
     active: bool = True
     notes: Optional[str] = None

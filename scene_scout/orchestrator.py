@@ -955,12 +955,16 @@ class Orchestrator:
         )
 
         cache = CacheService(run_id=run_id)
-        feed_configs = select_feed_configs(load_feed_configs(), uat_options.feed_ids)
+        feed_configs = select_feed_configs(
+            load_feed_configs(home_city=profile.home_city),
+            uat_options.feed_ids,
+        )
         entries, feed_reports = await feed_scout.run(
             feed_configs,
             run_id,
             get_feed_etag=cache.get_feed_etag,
             store_feed_etag=cache.set_feed_etag,
+            home_city=profile.home_city,
         )
         result.raw_entries = len(entries)
         result.feeds_fetched = len(feed_reports)

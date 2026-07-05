@@ -165,22 +165,27 @@ async def run_feed_probe(
     allow_failures: bool = False,
     verbose: bool = False,
     now: datetime | None = None,
+    home_city: str | None = None,
 ) -> FeedProbeResult:
-    """Fetch all active feeds and report ingest health without LLM calls."""
+    """Fetch active feeds and report ingest health without LLM calls."""
     if verbose:
         configure_log_level(logging.DEBUG)
 
     run_id = feed_probe_run_id(now)
     logger = get_logger("feed_scout", run_id=run_id)
-    logger.info("Feed probe starting", data={"active_feeds": "pending"})
+    logger.info(
+        "Feed probe starting",
+        data={"home_city": home_city, "active_feeds": "pending"},
+    )
 
-    feed_configs = load_feed_configs()
+    feed_configs = load_feed_configs(home_city=home_city)
     cache = CacheService(run_id=run_id)
     entries, reports = await feed_scout.run(
         feed_configs,
         run_id,
         get_feed_etag=cache.get_feed_etag,
         store_feed_etag=cache.set_feed_etag,
+        home_city=home_city,
     )
 
     payload = build_feed_probe_payload(run_id, entries, reports)
@@ -538,6 +543,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable DEBUG-level agent logs",
     )
+    feed_probe_parser.add_argument(
+        "--city",
+        default=None,
+        help=(
+            "Home city for metro feed filter (includes is_national feeds); "
+            "omit to probe all active feeds"
+        ),
+    )
 
     return parser
 
@@ -584,6 +597,7 @@ def main(argv: list[str] | None = None) -> int:
             run_feed_probe(
                 allow_failures=args.allow_failures,
                 verbose=args.verbose,
+                home_city=args.city,
             )
         )
         return result.exit_code

@@ -30,12 +30,14 @@ def _make_config(
     *,
     city: str = "New York",
     cursor: str | None = None,
+    is_national: bool = False,
 ) -> FeedConfig:
     return FeedConfig(
         id="eventbrite_test",
         name="Eventbrite NYC",
         url=url,
         city=city,
+        is_national=is_national,
         source_quality_score=0.7,
         source_type="api",
         cursor=cursor,
@@ -184,6 +186,26 @@ async def test_eventbrite_empty_results_return_empty_status(eventbrite_token):
 
     assert entries == []
     assert report.status == FeedStatus.EMPTY
+
+
+@respx.mock
+async def test_eventbrite_national_feed_uses_home_city_from_cache_hooks(
+    eventbrite_token,
+):
+    config = _make_config(city="New York", is_national=True)
+    route = respx.get(_SEARCH_URL).mock(
+        return_value=Response(200, json=_fixture("eventbrite_search_page1.json"))
+    )
+
+    await EventApiSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(home_city="Los Angeles"),
+    )
+
+    params = dict(route.calls.last.request.url.params)
+    assert params["location.address"] == "Los Angeles, CA"
+    assert params["location.within"] == "50km"
 
 
 @respx.mock
