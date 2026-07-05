@@ -123,6 +123,78 @@ sources are independent listings (`brooklynvegan`, `theskint`, `brooklyn_rail`,
 - Scraper failures produce `FeedHealthReport` without halting the pipeline
 - **Defer** until 1B.1–1B.3 are complete; implement additional sites incrementally
 
+> **Product direction (Jul 2026):** Indie/creative ingest is no longer the goal. See
+> [`260705_product_redesign.md`](260705_product_redesign.md). Implementation continues in
+> **Phase 1C** below.
+
+---
+
+## Phase 1C — Personalized Mainstream Discovery
+*Goal: Align ingest, profile, and time windows with mainstream events and personalization —
+without removing agents or Neighborhood Scout.*
+
+**Rationale:** [`260705_product_redesign.md`](260705_product_redesign.md)
+
+**Branching:** One feature branch per subphase (e.g. `feat/1c-1-profile-city-horizon`).
+
+### 1C.1 — UserProfile city and horizon
+**Files:** `scene_scout/models/user.py`, `scene_scout/prompts/user_preference_parse.txt`,
+`scene_scout/agents/user_preference.py`, web onboarding (when present), tests
+**Done when:**
+- `UserProfile` gains `home_city: str` and `horizon_days: int` (validated range, e.g. 1–60)
+- Cold-start parse prompt and LLM output schema populate both fields from onboarding
+- UAT `--prompt` path can set horizon when no persisted profile exists (or CLI flags documented)
+- Unit tests cover validation and parse output
+
+### 1C.2 — City-scoped feed loading
+**Files:** `scene_scout/config.py`, `scene_scout/orchestrator.py`, `config/feeds.yaml`
+(or `config/metro_feeds.yaml` if split), tests
+**Done when:**
+- `load_feed_configs()` accepts optional `city: str | None`; when set, returns only
+  active feeds whose `FeedConfig.city` matches
+- Orchestrator passes `profile.home_city` into feed loading before `feed_scout.run()`
+- `feed-probe` supports optional `--city` for operator checks
+- Unit test: mixed-city config returns correct subset
+
+### 1C.3 — Mainstream metro feed catalog
+**Files:** `config/feeds.yaml`, `.env.example`, docs cross-links
+**Done when:**
+- Feed catalog reflects redesign: structured mainstream sources per metro (e.g. DoNYC +
+  multiple API slots); indie/editorial RSS and fragile scrapes removed or `active: false`
+- Eventbrite search feed inactive until a working API endpoint is configured
+- `feed-probe` for default metro returns non-zero entries from ≥2 independent sources
+- Notes in config header point to `260705_product_redesign.md`
+
+### 1C.4 — Structured ingest bypass (skip extraction LLM)
+**Files:** `scene_scout/orchestrator.py`, source adapters (`event_api.py`, `ical.py`, optional
+`html_calendar.py` flag), `scene_scout/models/event.py`, tests
+**Done when:**
+- For `source_type` in `api`, `ical` (and optionally marked structured scrape feeds),
+  orchestrator maps adapter output to `EventCandidate` or `NormalizedEvent` without calling
+  `event_extraction.run()` when required fields are present
+- `seen_entries` cache still keyed by `(feed_id, entry_hash)`; bypass path writes cache after
+  normalization same as today
+- Unit tests cover bypass vs extraction path; token savings logged in run summary (optional count)
+
+### 1C.5 — User horizon drives time windows
+**Files:** `scene_scout/normalization_config.py`, `scene_scout/pre_enrichment_filter_config.py`,
+`scene_scout/agents/event_normalization.py`, `scene_scout/orchestrator.py`, iCal adapter,
+tests
+**Done when:**
+- Normalization window and pre-enrichment "coming week" filter both use
+  `profile.horizon_days` instead of hardcoded `7`
+- Single source of truth passed from orchestrator (no conflicting constants)
+- Unit tests: event at `now + horizon_days` kept; event at `now + horizon_days + 1` discarded
+
+### 1C.6 — Personalization UAT and docs sync
+**Files:** `docs/260705_product_redesign.md`, `README.md` (pointer), `docs/260629_uat_debug_plan.md`
+(completion note only), Tier B/C examples in README or redesign doc
+**Done when:**
+- Personalization acceptance demo (Run A → clicks → Run B) documented and runnable
+- Tier B/C examples use city + horizon aligned feeds; warn against `--max-extraction` hiding
+  catalog unless testing cost caps
+- Dry-run UAT produces non-zero `normalized_events` with default mainstream metro config
+
 ---
 
 ## Phase 2 — Project Infrastructure
@@ -840,6 +912,11 @@ invoke). Does not send email or call LLM providers.
 | Event API platform (Eventbrite vs Songkick) | Open — decide in 1B.3 | 1B.3 |
 | iCal library calendars (NYPL, BPL) | Retired in UAT-D.11 — pending official ICS endpoints | 1B.2 |
 | HTML calendar scrapers | Deferred — per-site, after 1B.1–1B.3 | 1B.4 |
+| Product redesign (mainstream + personalization) | Active — see [`260705_product_redesign.md`](260705_product_redesign.md) | 1C |
+| `UserProfile.home_city` / `horizon_days` | Planned | 1C.1 |
+| City-scoped feed catalog | Planned | 1C.2 |
+| Structured ingest bypass (skip extraction LLM) | Planned | 1C.4 |
+| Eventbrite search API | Inactive — endpoint 404; org/partner API TBD | 1C.3 |
 
 ---
 

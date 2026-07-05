@@ -2,14 +2,20 @@
 
 ## Overview
 
-SceneScout is a personalized, location-agnostic event discovery agent. It reads RSS feeds
-from any city, extracts and normalizes event data, enriches events with performer
-intelligence, vibe classification, and hyper-local neighborhood context, ranks events
-against a user's taste profile, and delivers a curated weekly top 10 recommendation email.
+SceneScout is a **personalized mainstream event discovery agent** and a **learning project
+in agentic AI**. A user chooses a U.S. city, sets how many days ahead to search, and
+describes their tastes in a cold-start prompt. The system ingests events from multiple
+mainstream sources per metro, normalizes and deduplicates them, enriches them with
+performer intelligence, vibe classification, and **hyper-local neighborhood context**,
+ranks them against a evolving taste profile, and delivers a curated top-10 recommendation
+email.
 
 The system is a multi-agent application where each agent owns a discrete responsibility
-with defined inputs, outputs, and failure modes. SceneScout is a single-user application
-and a learning project in agentic AI design, DevOps, and backend engineering.
+with defined inputs, outputs, and failure modes. SceneScout is a single-user application —
+not a ticketing platform or StubHub competitor.
+
+**Product direction:** [`260705_product_redesign.md`](260705_product_redesign.md)
+**Build order:** [`project_plan.md`](project_plan.md) — Phase 1C
 
 ---
 
@@ -318,15 +324,22 @@ corrected or updated event (venue change, date correction) gets re-extracted.
 
 **Orchestrator flow:**
 ```
-RawFeedEntry from Feed Scout
+RawFeedEntry from Feed Scout (city-scoped feeds)
   |
   v
 Check seen_entries cache (feed_id, entry_hash)
   |-- Cache hit, not expired  --> retrieve NormalizedEvent; skip Extraction + Normalization
-  |-- Cache miss or expired   --> send to Extraction Agent
-                                  --> Normalization Agent
+  |-- Cache miss or expired   --> Structured source (api / ical)?
+                                  |-- yes, fields complete --> Normalization (skip Extraction LLM)
+                                  |-- no                     --> Extraction Agent
+                                                               --> Normalization Agent
                                   --> write result to seen_entries cache
 ```
+
+**Structured ingest lane (Phase 1C):** Event platform APIs and ICS feeds that return
+high-confidence title, venue, datetime, and URL should not consume an Event Extraction
+LLM call per row. Unstructured RSS or thin scrape entries still use Extraction. See
+[`260705_product_redesign.md`](260705_product_redesign.md).
 
 ### Why Multiple Copies of the Same Event Are Acceptable
 
@@ -350,11 +363,11 @@ Single long-running Modal function. Two-phase execution:
 
 ```
 Phase 1 — Ingest and normalize:
-  Feed Scout (ETag/304 check → skip UNCHANGED feeds)
+  Feed Scout (city-scoped feeds; ETag/304 → skip UNCHANGED feeds)
   → seen_entries cache check → skip known entries
-  → Extraction (new entries only)
-  → Normalization → Deduplication → Description Quality
-  → Pre-enrichment filter
+  → Structured ingest bypass OR Extraction (unstructured entries only)
+  → Normalization (horizon from UserProfile) → Deduplication → Description Quality
+  → Pre-enrichment filter (same horizon as normalization)
   → Geocode venues (Nominatim, cached)
   → Submit enrichment batch (Talent Scout + Vibe + Neighborhood Scout)
   → Write PipelineState to vol-pipeline-state
@@ -552,10 +565,12 @@ class CuratorConfig(BaseModel):
 
 ## User Onboarding
 
-On first use, the user provides via the web UI:
-1. **Name** — used in email salutation
-2. **Email address** — stored in Modal Secrets as `USER_EMAIL`; copied to `UserProfile`
-3. **Cold-start prompt** — free-text interests, dislikes, and constraints
+On first use, the user provides via the web UI (or UAT CLI for development):
+1. **Home city** — U.S. metro; selects which feeds to ingest (Phase 1C)
+2. **Horizon (days out)** — how far ahead to include events in normalization and filtering
+3. **Name** — used in email salutation
+4. **Email address** — stored in Modal Secrets as `USER_EMAIL`; copied to `UserProfile`
+5. **Cold-start prompt** — free-text interests, dislikes, and constraints
 
 ---
 
@@ -961,6 +976,8 @@ class UserProfile(BaseModel):
     user_id: str
     name: str
     email: str
+    home_city: str              # Phase 1C — metro for feed catalog filter
+    horizon_days: int           # Phase 1C — normalization + pre-enrichment window
     stated_interests: list[str]
     stated_dislikes: list[str]
     preferred_neighborhoods: list[str]
@@ -973,6 +990,9 @@ class UserProfile(BaseModel):
     last_updated: datetime
     profile_version: int
 ```
+
+> **Note:** `home_city` and `horizon_days` are specified in Phase 1C; the running code
+> may not yet include them until that subphase lands.
 
 ---
 

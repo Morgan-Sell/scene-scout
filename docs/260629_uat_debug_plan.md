@@ -1,10 +1,16 @@
 # SceneScout: UAT Debug Plan (2026-06-29)
 
+**Status:** **Completed** (Jul 2026). All UAT-D subphases implemented or documented.
+Product and feed strategy after this work are superseded by
+[`260705_product_redesign.md`](260705_product_redesign.md).
+
 **Incident run:** `20260629-013422`
 
 This plan documents fixes and enhancements triggered by the first full dry-run UAT after
 Phase 1B multi-source ingestion. It complements — but does not replace — the main
 [project plan](project_plan.md) and [architecture](architecture.md) UAT documentation.
+It is retained as a **historical record** of pipeline fixes (seen_entries zip, iCal
+pre-filter, tiered UAT, etc.).
 
 **Related project plan sections:**
 - [Phase 7.7 — Full End-to-End UAT](project_plan.md) (dry-run and live-email gates)

@@ -89,6 +89,7 @@ async def test_eventbrite_fields_mapped_to_raw_feed_entry(eventbrite_token):
         first.link == "https://www.eventbrite.com/e/sandlot-summer-concert-123456789012"
     )
     assert "live music" in first.description.lower()
+    assert first.description.startswith("Venue: Neighborhood Ball Field")
     assert first.published_raw == "2026-07-18T19:00:00"
     assert first.author == "Neighborhood Events Co"
     assert first.categories == ["Music"]
@@ -114,6 +115,7 @@ async def test_eventbrite_geo_filter_uses_new_york_params(eventbrite_token):
     assert params["location.address"] == "New York, NY"
     assert params["location.within"] == "50km"
     assert params["page"] == "1"
+    assert params["expand"] == "organizer,category,venue"
 
 
 @respx.mock

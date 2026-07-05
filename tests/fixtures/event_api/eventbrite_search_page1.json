@@ -23,6 +23,9 @@
       "organizer": {
         "name": "Neighborhood Events Co"
       },
+      "venue": {
+        "name": "Neighborhood Ball Field"
+      },
       "category": {
         "name": "Music"
       }

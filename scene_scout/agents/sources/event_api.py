@@ -180,9 +180,7 @@ def _map_eventbrite_event(
 ) -> RawFeedEntry:
     """Map an Eventbrite event object to ``RawFeedEntry``."""
     name = _text_field(event.get("name"))
-    description = _text_field(event.get("description")) or _text_field(
-        event.get("summary")
-    )
+    description = _eventbrite_description(event)
     start = event.get("start") or {}
     published_raw = start.get("local") or start.get("utc")
     organizer = event.get("organizer") or {}
@@ -217,9 +215,9 @@ def _eventbrite_search_params(config: FeedConfig) -> dict[str, str]:
         return {
             "location.address": config.city,
             "location.within": "50km",
-            "expand": "organizer,category",
+            "expand": "organizer,category,venue",
         }
-    return {**geo, "expand": "organizer,category"}
+    return {**geo, "expand": "organizer,category,venue"}
 
 
 def _detect_platform(url: str) -> str:
@@ -241,6 +239,25 @@ def _parse_cursor(cursor: Optional[str]) -> int:
     except ValueError:
         return 1
     return max(page, 1)
+
+
+def _eventbrite_venue_name(event: dict[str, Any]) -> Optional[str]:
+    """Return the venue name from an expanded Eventbrite event payload."""
+    venue = event.get("venue")
+    if not isinstance(venue, dict):
+        return None
+    return _text_field(venue.get("name"))
+
+
+def _eventbrite_description(event: dict[str, Any]) -> Optional[str]:
+    """Build entry description with venue context for downstream extraction."""
+    body = _text_field(event.get("description")) or _text_field(event.get("summary"))
+    venue = _eventbrite_venue_name(event)
+    if venue and body:
+        return f"Venue: {venue}\n\n{body}"
+    if venue:
+        return venue
+    return body
 
 
 def _text_field(value: Any) -> Optional[str]:

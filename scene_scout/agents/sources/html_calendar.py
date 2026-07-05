@@ -232,7 +232,7 @@ async def _fetch_css(
         description = (
             description_el.get_text(" ", strip=True) if description_el else None
         )
-        published_raw = date_el.get_text(" ", strip=True) if date_el else None
+        published_raw = _css_date_text(date_el)
 
         if title or link:
             items.append(
@@ -245,6 +245,20 @@ async def _fetch_css(
             )
 
     return items
+
+
+def _css_date_text(date_el: Any) -> Optional[str]:
+    """Return a date string from a CSS-selected date element."""
+    if date_el is None:
+        return None
+    text = date_el.get_text(" ", strip=True)
+    if text:
+        return text
+    for attr in ("datetime", "content"):
+        value = date_el.get(attr)
+        if value:
+            return str(value).strip()
+    return None
 
 
 async def _get_text(client: httpx.AsyncClient, url: str) -> str:

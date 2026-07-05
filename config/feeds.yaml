@@ -4,7 +4,6 @@
 # source_type: rss (default) | ical | api | scrape — selects the ingestion adapter.
 # source_quality_score: 0.0–1.0. Higher = more reliable event data.
 # Only working event sources belong here — remove entries that cannot ingest.
-# Active set (UAT-D.11): brooklynvegan, theskint, brooklyn_rail, harlem_one_stop.
 # Tier B/C smoke default: brooklynvegan,theskint (see docs/260629_uat_debug_plan.md).
 
 feeds:
@@ -24,6 +23,33 @@ feeds:
     active: true
     notes: "Free and cheap NYC events. Curated weekly listings."
 
+  - id: donyc
+    name: DoNYC
+    url: https://donyc.com/events
+    city: New York
+    source_quality_score: 0.85
+    source_type: scrape
+    active: true
+    scrape:
+      strategy: css
+      item_selector: ".event-card"
+      title_selector: ".ds-listing-event-title-text"
+      link_selector: "a.ds-listing-event-title"
+      description_selector: ".ds-venue-name"
+      date_selector: '[itemprop="startDate"]'
+    notes: >
+      NYC event listings with venue and start time on listing cards. Verified Jul 2026.
+
+  - id: eventbrite_nyc
+    name: Eventbrite NYC
+    url: eventbrite://events/search
+    city: New York
+    source_quality_score: 0.70
+    source_type: api
+    active: true
+    notes: >
+      NYC-area events via Eventbrite search API. Requires EVENTBRITE_API_TOKEN in .env.
+
   - id: brooklyn_rail
     name: Brooklyn Rail Events
     url: https://brooklynrail.org/events
@@ -36,6 +62,8 @@ feeds:
       item_selector: 'div[class*="events_card"]'
       title_selector: h2
       link_selector: a
+      date_selector: "p.text-xs.uppercase"
+      description_selector: "span.uppercase.font-normal"
     notes: >
       Readings, panels, and creative community events. CSS scrape verified Jun 2026.
 
@@ -49,7 +77,27 @@ feeds:
     scrape:
       strategy: css
       item_selector: 'div.tile:has(a[href^="/event/"])'
-      title_selector: a
+      title_selector: "a h6"
       link_selector: a
+      description_selector: "span.date b"
+      date_selector: "span.date"
     notes: >
-      Harlem cultural events calendar. One row per event on homepage tiles.
+      Harlem cultural events calendar. Homepage tiles with venue and date range.
+
+  - id: bkmag
+    name: Brooklyn Magazine
+    url: https://www.bkmag.com/feed/
+    city: New York
+    source_quality_score: 0.55
+    active: true
+    notes: >
+      Weekend guides and NYC lifestyle listings. Mixed editorial signal; lower quality score.
+
+  - id: bk_reader
+    name: BK Reader
+    url: https://www.bkreader.com/rss/
+    city: New York
+    source_quality_score: 0.50
+    active: true
+    notes: >
+      Brooklyn neighborhood news with occasional event coverage. Supplemental source.
