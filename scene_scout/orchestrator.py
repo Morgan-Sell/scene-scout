@@ -49,6 +49,8 @@ from scene_scout.models.user import UserProfile
 from scene_scout.orchestrator_config import (
     ENRICHMENT_BATCH_POLL_INTERVAL_SECONDS,
     UatRunOptions,
+    resolve_uat_home_city,
+    resolve_uat_horizon_days,
     select_feed_configs,
 )
 from scene_scout.pre_enrichment_filter_config import (
@@ -764,14 +766,25 @@ def _top_recommendation_rows(
     return rows
 
 
-async def _resolve_user_profile(prompt: str, run_id: str) -> UserProfile:
+async def _resolve_user_profile(
+    prompt: str,
+    run_id: str,
+    *,
+    home_city: str | None = None,
+    horizon_days: int | None = None,
+) -> UserProfile:
     """Load a persisted profile or parse one from the UAT prompt."""
     logger = get_logger("orchestrator", run_id=run_id)
     try:
         profile = user_preference.load_profile()
         logger.info(
             "Loaded persisted user profile",
-            data={"user_id": profile.user_id, "name": profile.name},
+            data={
+                "user_id": profile.user_id,
+                "name": profile.name,
+                "home_city": profile.home_city,
+                "horizon_days": profile.horizon_days,
+            },
         )
         return profile
     except UserProfileNotFoundError:
@@ -783,15 +796,40 @@ async def _resolve_user_profile(prompt: str, run_id: str) -> UserProfile:
                 "Complete web onboarding or set USER_EMAIL in .env before UAT."
             ) from None
 
+        resolved_city = home_city or resolve_uat_home_city(None)
+        resolved_horizon = (
+            horizon_days
+            if horizon_days is not None
+            else (resolve_uat_horizon_days(None))
+        )
+        if not resolved_city:
+            raise RuntimeError(
+                "No user profile found and home city is not configured. "
+                "Complete web onboarding or pass --city / set UAT_HOME_CITY before UAT."
+            ) from None
+        if resolved_horizon is None:
+            raise RuntimeError(
+                "No user profile found and horizon is not configured. "
+                "Complete web onboarding or pass --horizon-days / set "
+                "UAT_HORIZON_DAYS before UAT."
+            ) from None
+
         logger.info(
             "No persisted profile — parsing cold-start from UAT prompt",
-            data={"email": user_email, "name": user_name},
+            data={
+                "email": user_email,
+                "name": user_name,
+                "home_city": resolved_city,
+                "horizon_days": resolved_horizon,
+            },
         )
         return await user_preference.parse_cold_start(
             name=user_name,
             email=user_email,
             prompt=prompt,
             run_id=run_id,
+            home_city=resolved_city,
+            horizon_days=resolved_horizon,
         )
 
 
@@ -909,7 +947,12 @@ class Orchestrator:
     ) -> PipelineResult:
         run_migrations()
 
-        profile = await _resolve_user_profile(prompt, run_id)
+        profile = await _resolve_user_profile(
+            prompt,
+            run_id,
+            home_city=uat_options.home_city,
+            horizon_days=uat_options.horizon_days,
+        )
 
         cache = CacheService(run_id=run_id)
         feed_configs = select_feed_configs(load_feed_configs(), uat_options.feed_ids)

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from scene_scout.models.feed import FeedConfig
+from scene_scout.models.user import HORIZON_DAYS_MAX, HORIZON_DAYS_MIN
 
 ENRICHMENT_BATCH_POLL_INTERVAL_SECONDS = 300
 
@@ -20,6 +21,8 @@ class UatRunOptions:
     feed_ids: frozenset[str] | None = None
     max_extraction: int | None = None
     stop_after: UatStopAfter | None = None
+    home_city: str | None = None
+    horizon_days: int | None = None
 
 
 def parse_feed_ids(raw: str | None) -> frozenset[str] | None:
@@ -28,6 +31,37 @@ def parse_feed_ids(raw: str | None) -> frozenset[str] | None:
         return None
     feed_ids = frozenset(part.strip() for part in raw.split(",") if part.strip())
     return feed_ids or None
+
+
+def resolve_uat_home_city(cli_value: str | None) -> str | None:
+    """Resolve UAT home city from ``--city`` or ``UAT_HOME_CITY``."""
+    if cli_value is not None and cli_value.strip():
+        return cli_value.strip()
+    env_raw = os.getenv("UAT_HOME_CITY")
+    if env_raw and env_raw.strip():
+        return env_raw.strip()
+    return None
+
+
+def resolve_uat_horizon_days(cli_value: int | None) -> int | None:
+    """Resolve UAT horizon from ``--horizon-days`` or ``UAT_HORIZON_DAYS``."""
+    if cli_value is not None:
+        if not HORIZON_DAYS_MIN <= cli_value <= HORIZON_DAYS_MAX:
+            raise ValueError(
+                f"--horizon-days must be between {HORIZON_DAYS_MIN} and "
+                f"{HORIZON_DAYS_MAX}"
+            )
+        return cli_value
+    env_raw = os.getenv("UAT_HORIZON_DAYS")
+    if not env_raw:
+        return None
+    value = int(env_raw)
+    if not HORIZON_DAYS_MIN <= value <= HORIZON_DAYS_MAX:
+        raise ValueError(
+            f"UAT_HORIZON_DAYS must be between {HORIZON_DAYS_MIN} and "
+            f"{HORIZON_DAYS_MAX}"
+        )
+    return value
 
 
 def resolve_uat_max_extraction(cli_value: int | None) -> int | None:

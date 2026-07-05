@@ -2,6 +2,9 @@
  * SceneScout onboarding & profile — vanilla JS SPA.
  */
 
+const HORIZON_DAYS_MIN = 1;
+const HORIZON_DAYS_MAX = 60;
+
 const tabs = document.querySelectorAll(".tab");
 const panels = document.querySelectorAll(".panel");
 const form = document.getElementById("onboarding-form");
@@ -9,7 +12,18 @@ const statusEl = document.getElementById("onboarding-status");
 const summaryEl = document.getElementById("profile-summary");
 const profileDisplay = document.getElementById("profile-display");
 
-function validateOnboarding(name, email, prompt) {
+function validateOnboarding(homeCity, horizonDays, name, email, prompt) {
+  if (!homeCity.trim()) {
+    return "Home city is required.";
+  }
+  const horizon = Number(horizonDays);
+  if (
+    !Number.isInteger(horizon) ||
+    horizon < HORIZON_DAYS_MIN ||
+    horizon > HORIZON_DAYS_MAX
+  ) {
+    return `Horizon must be between ${HORIZON_DAYS_MIN} and ${HORIZON_DAYS_MAX} days.`;
+  }
   if (!name.trim()) {
     return "Name is required.";
   }
@@ -62,6 +76,10 @@ function renderProfile(profile, container) {
   const weights = JSON.stringify(profile.category_weights || {}, null, 2);
   container.innerHTML = `
     <h2>Your profile</h2>
+    <div class="profile-section">
+      <h3>Location &amp; horizon</h3>
+      <p>${escapeHtml(profile.home_city)} · ${escapeHtml(String(profile.horizon_days))} days ahead</p>
+    </div>
     <div class="profile-section">
       <h3>Name &amp; email</h3>
       <p>${escapeHtml(profile.name)} · ${escapeHtml(profile.email)}</p>
@@ -151,11 +169,19 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearStatus();
 
+  const homeCity = form.home_city.value;
+  const horizonDays = form.horizon_days.value;
   const name = form.name.value;
   const email = form.email.value;
   const prompt = form.prompt.value;
 
-  const validationError = validateOnboarding(name, email, prompt);
+  const validationError = validateOnboarding(
+    homeCity,
+    horizonDays,
+    name,
+    email,
+    prompt,
+  );
   if (validationError) {
     showStatus(validationError, true);
     return;
@@ -168,7 +194,13 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch("/api/onboarding", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, prompt }),
+      body: JSON.stringify({
+        home_city: homeCity.trim(),
+        horizon_days: Number(horizonDays),
+        name,
+        email,
+        prompt,
+      }),
     });
     const data = await response.json();
 
@@ -180,6 +212,7 @@ form.addEventListener("submit", async (event) => {
 
     showStatus(`Profile saved for ${data.name}. Allegra is ready.`, false);
     renderProfile(data, summaryEl);
+    summaryEl.hidden = false;
   } catch {
     showStatus("Could not reach the server. Try again.", true);
     summaryEl.hidden = true;

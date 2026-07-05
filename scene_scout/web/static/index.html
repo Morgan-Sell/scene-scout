@@ -48,7 +48,7 @@
       </nav>
 
       <p class="subtitle">
-        Your name, email, and what you love. That's all Allegra needs.
+        Your city, how far ahead to look, and what you love. That's all Allegra needs.
       </p>
 
       <section
@@ -58,6 +58,33 @@
         aria-labelledby="tab-onboarding"
       >
         <form id="onboarding-form" class="onboarding-form" novalidate>
+          <div class="field-row">
+            <div class="field">
+              <label for="home_city">Home city</label>
+              <input
+                id="home_city"
+                name="home_city"
+                type="text"
+                autocomplete="address-level2"
+                placeholder="New York"
+                required
+              />
+            </div>
+            <div class="field">
+              <label for="horizon_days">Horizon (days out)</label>
+              <input
+                id="horizon_days"
+                name="horizon_days"
+                type="number"
+                min="1"
+                max="60"
+                value="14"
+                required
+              />
+              <p class="field-hint">How far ahead to search for events</p>
+            </div>
+          </div>
+
           <div class="field-row">
             <div class="field">
               <label for="name">Name</label>
@@ -122,6 +149,6 @@
       </footer>
     </div>
 
-    <script src="/app.js?v=2"></script>
+    <script src="/app.js?v=3"></script>
   </body>
 </html>

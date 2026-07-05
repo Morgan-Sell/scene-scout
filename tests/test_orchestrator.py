@@ -67,6 +67,8 @@ def _uat_profile() -> UserProfile:
         user_id="smalls-uat",
         name="Smalls",
         email="smalls@example.com",
+        home_city="New York",
+        horizon_days=14,
         stated_interests=["baseball"],
         vibe_preferences=["outdoor"],
         category_weights={"baseball": 0.9},
@@ -977,6 +979,8 @@ async def test_resolve_user_profile_parses_cold_start_when_missing(
 ) -> None:
     monkeypatch.setenv("USER_EMAIL", "smalls@example.com")
     monkeypatch.setenv("USER_NAME", "Smalls")
+    monkeypatch.setenv("UAT_HOME_CITY", "New York")
+    monkeypatch.setenv("UAT_HORIZON_DAYS", "14")
     parsed = _uat_profile()
     with patch(
         "scene_scout.orchestrator.user_preference.parse_cold_start",
@@ -985,7 +989,14 @@ async def test_resolve_user_profile_parses_cold_start_when_missing(
         loaded = await _resolve_user_profile(SANDLOT_PROMPT, TEST_RUN_ID)
 
     assert loaded == parsed
-    mock_parse.assert_awaited_once()
+    mock_parse.assert_awaited_once_with(
+        name="Smalls",
+        email="smalls@example.com",
+        prompt=SANDLOT_PROMPT,
+        run_id=TEST_RUN_ID,
+        home_city="New York",
+        horizon_days=14,
+    )
 
 
 @pytest.mark.asyncio

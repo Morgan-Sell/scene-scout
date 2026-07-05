@@ -33,6 +33,8 @@ def _profile(**overrides: object) -> UserProfile:
         "user_id": "user-123",
         "name": "Morgan",
         "email": "morgan@example.com",
+        "home_city": "Los Angeles",
+        "horizon_days": 14,
         "stated_interests": ["jazz"],
         "preferred_neighborhoods": ["Silver Lake"],
         "category_weights": {"jazz": 0.9},

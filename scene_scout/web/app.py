@@ -20,6 +20,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from scene_scout.agents import user_preference
 from scene_scout.agents.user_preference import UserProfileNotFoundError
+from scene_scout.models.user import (
+    HORIZON_DAYS_MAX,
+    HORIZON_DAYS_MIN,
+)
 from scene_scout.services.llm import LLMInfrastructureError, LLMValidationError
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -34,6 +38,8 @@ class OnboardingRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    home_city: str
+    horizon_days: int
     name: str = Field(min_length=1)
     email: str = Field(min_length=1)
     prompt: str = Field(min_length=1)
@@ -51,8 +57,29 @@ def _onboarding_run_id() -> str:
     return f"{_ONBOARDING_RUN_ID_PREFIX}-{stamp}"
 
 
-def validate_onboarding_inputs(name: str, email: str, prompt: str) -> str | None:
+def validate_onboarding_location(home_city: str, horizon_days: int) -> str | None:
+    """Return a client-facing validation error for city/horizon, or None if valid."""
+    if not home_city.strip():
+        return "Home city is required."
+    if not HORIZON_DAYS_MIN <= horizon_days <= HORIZON_DAYS_MAX:
+        return (
+            f"Horizon must be between {HORIZON_DAYS_MIN} and {HORIZON_DAYS_MAX} days."
+        )
+    return None
+
+
+def validate_onboarding_inputs(
+    name: str,
+    email: str,
+    prompt: str,
+    *,
+    home_city: str,
+    horizon_days: int,
+) -> str | None:
     """Return a client-facing validation error message, or None if valid."""
+    location_error = validate_onboarding_location(home_city, horizon_days)
+    if location_error:
+        return location_error
     if not name.strip():
         return "Name is required."
     if not email.strip():
@@ -124,10 +151,19 @@ def create_app() -> FastAPI:
 
     @application.post("/api/onboarding", response_model=None)
     async def onboarding(body: OnboardingRequest):
+        location_error = validate_onboarding_location(body.home_city, body.horizon_days)
+        if location_error:
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content={"error": location_error},
+            )
+
         validation_error = validate_onboarding_inputs(
             body.name,
             body.email,
             body.prompt,
+            home_city=body.home_city,
+            horizon_days=body.horizon_days,
         )
         if validation_error:
             return JSONResponse(
@@ -141,6 +177,8 @@ def create_app() -> FastAPI:
                 email=body.email,
                 prompt=body.prompt,
                 run_id=_onboarding_run_id(),
+                home_city=body.home_city,
+                horizon_days=body.horizon_days,
             )
         except LLMInfrastructureError as exc:
             return JSONResponse(

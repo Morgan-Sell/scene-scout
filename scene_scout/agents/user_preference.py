@@ -97,12 +97,18 @@ async def parse_cold_start(
     email: str,
     prompt: str,
     run_id: str,
+    *,
+    home_city: str,
+    horizon_days: int,
 ) -> UserProfile:
     """Parse a cold-start prompt into a ``UserProfile`` and persist it.
 
     Calls ``llm.complete()`` with the rendered ``user_preference_parse`` prompt,
     validates the response, merges onboarding metadata, and writes
     ``vol-profiles/profile.json``.
+
+    ``home_city`` and ``horizon_days`` are supplied by onboarding or UAT CLI flags;
+    they are not extracted from the taste prompt by the LLM.
 
     Parameters
     ----------
@@ -114,6 +120,10 @@ async def parse_cold_start(
         Free-text cold-start interests, dislikes, and constraints.
     run_id : str
         Pipeline run identifier for logging.
+    home_city : str
+        U.S. metro for feed catalog selection (Phase 1C.2).
+    horizon_days : int
+        Days ahead to include events in normalization windows (Phase 1C.5).
 
     Returns
     -------
@@ -147,6 +157,8 @@ async def parse_cold_start(
         user_id=_user_id_from_email(email),
         name=name.strip(),
         email=email.strip(),
+        home_city=home_city.strip(),
+        horizon_days=horizon_days,
         created_at=now,
         last_updated=now,
         profile_version=1,
@@ -159,6 +171,8 @@ async def parse_cold_start(
         data={
             "profile_path": str(written_path),
             "user_id": profile.user_id,
+            "home_city": profile.home_city,
+            "horizon_days": profile.horizon_days,
             "stated_interests_count": len(profile.stated_interests),
             "vibe_preferences_count": len(profile.vibe_preferences),
             "excluded_categories_count": len(profile.excluded_categories),
