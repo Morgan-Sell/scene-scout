@@ -137,14 +137,56 @@ without removing agents or Neighborhood Scout.*
 
 **Branching:** One feature branch per subphase (e.g. `feat/1c-1-profile-city-horizon`).
 
-### 1C.1 — UserProfile city and horizon
-**Files:** `scene_scout/models/user.py`, `scene_scout/prompts/user_preference_parse.txt`,
-`scene_scout/agents/user_preference.py`, web onboarding (when present), tests
-**Done when:**
+### 1C.1 — UserProfile city and horizon (backend + onboarding UI)
+**Files:**
+`scene_scout/models/user.py`,
+`scene_scout/prompts/user_preference_parse.txt`,
+`scene_scout/agents/user_preference.py`,
+`scene_scout/web/app.py`,
+`scene_scout/web/static/index.html`,
+`scene_scout/web/static/app.js`,
+`scene_scout/cli.py` (UAT flags or documented fallback),
+`tests/models/test_user.py`,
+`tests/agents/test_user_preference.py`,
+web UI tests or manual checklist (see Done when)
+
+**Context:** Extends [Phase 7.5](#75--custom-web-ui-onboarding-and-profile) onboarding. City and
+horizon are **explicit form fields**, not inferred only from the taste prompt. The LLM still
+parses interests/dislikes from the prompt; `home_city` and `horizon_days` are passed through
+from the UI (and stored on `UserProfile`).
+
+**Backend — model and agent:**
 - `UserProfile` gains `home_city: str` and `horizon_days: int` (validated range, e.g. 1–60)
-- Cold-start parse prompt and LLM output schema populate both fields from onboarding
-- UAT `--prompt` path can set horizon when no persisted profile exists (or CLI flags documented)
-- Unit tests cover validation and parse output
+- `UserProfileParseLLMOutput` unchanged for taste fields; city/horizon set on the profile
+  from request args, not from LLM extraction
+- `user_preference.parse_cold_start(..., home_city=..., horizon_days=...)` accepts both;
+  writes them to `vol-profiles/profile.json`
+- `POST /api/onboarding` body extends to
+  `{name, email, home_city, horizon_days, prompt}`; server validates city non-empty and
+  horizon in range before calling the agent
+
+**Frontend — onboarding tab (`scene_scout/web/static/`):**
+- **Home city** — text input (or select if a metro list is added later); required; placed
+  above name/email; placeholder e.g. "New York"
+- **Horizon (days out)** — number input; required; min/max aligned with model validation
+  (e.g. 1–60); helper text e.g. "How far ahead to search for events"
+- Form order matches [architecture](architecture.md): city → horizon → name → email → taste
+- Client-side validation mirrors backend (city, horizon range, existing name/email/prompt rules)
+- Submit sends all five fields in `POST /api/onboarding`
+- Success summary and Profile tab display `home_city` and `horizon_days`
+
+**UAT / CLI fallback (no web UI required for pipeline dev):**
+- `uat` accepts `--city` and `--horizon-days` (or env vars documented in `.env.example`) when
+  no persisted profile exists, so Tier B/C runs work without opening the browser
+
+**Done when:**
+- [ ] `UserProfile` validates `home_city` and `horizon_days`; unit tests cover bounds
+- [ ] Web onboarding form shows city + horizon inputs; submit persists both fields
+- [ ] Profile tab renders `home_city` and `horizon_days`
+- [ ] Invalid horizon or empty city returns 422 with clear error on `POST /api/onboarding`
+- [ ] UAT/CLI path documented for runs without a saved profile
+- [ ] `docker-compose up` + manual smoke: complete onboarding in browser; reload Profile tab
+  and confirm city/horizon visible
 
 ### 1C.2 — City-scoped feed loading
 **Files:** `scene_scout/config.py`, `scene_scout/orchestrator.py`, `config/feeds.yaml`
