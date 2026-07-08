@@ -1,30 +1,20 @@
 # SceneScout Feed Configuration
 #
+# Product direction: docs/260705_product_redesign.md
+# Build phases: docs/project_plan.md — Phase 1C (city-scoped ingest, mainstream catalog)
+#
 # Each feed entry defines an event source and its metadata.
 # source_type: rss (default) | ical | api | scrape — selects the ingestion adapter.
 # source_quality_score: 0.0–1.0. Higher = more reliable event data.
 # city: metro tag for local feeds; matched against UserProfile.home_city at ingest.
 # is_national: true — always included for every user; national API adapters query
 #   using profile.home_city (not feed.city). Use for Ticketmaster, Eventbrite, etc.
-# Only working event sources belong here — remove entries that cannot ingest.
-# Tier B/C smoke default: brooklynvegan,theskint (see docs/260629_uat_debug_plan.md).
+#
+# Default metro (launch): New York. Active mainstream set: donyc + theskint.
+# Tier B/C smoke: donyc,theskint (see docs/260705_product_redesign.md).
 
 feeds:
-  - id: brooklynvegan
-    name: BrooklynVegan
-    url: https://www.brooklynvegan.com/feed/
-    city: New York
-    source_quality_score: 0.85
-    active: true
-    notes: "NYC music and show listings. Strong event signal."
-
-  - id: theskint
-    name: the skint
-    url: https://www.theskint.com/feed/
-    city: New York
-    source_quality_score: 0.90
-    active: true
-    notes: "Free and cheap NYC events. Curated weekly listings."
+  # --- New York — active mainstream ---
 
   - id: donyc
     name: DoNYC
@@ -41,18 +31,76 @@ feeds:
       description_selector: ".ds-venue-name"
       date_selector: '[itemprop="startDate"]'
     notes: >
-      NYC event listings with venue and start time on listing cards. Verified Jul 2026.
+      Structured NYC aggregator — venue and ISO start time on listing cards.
+      Primary mainstream source for New York (Phase 1C.3).
 
-  - id: eventbrite_nyc
-    name: Eventbrite NYC
+  - id: theskint
+    name: the skint
+    url: https://www.theskint.com/feed/
+    city: New York
+    source_quality_score: 0.90
+    active: true
+    notes: >
+      Curated free and cheap NYC events. Secondary mainstream listing feed for New York.
+
+  # --- National APIs — inactive until endpoints and tokens are configured ---
+
+  - id: eventbrite
+    name: Eventbrite
     url: eventbrite://events/search
     city: New York
     is_national: true
     source_quality_score: 0.70
     source_type: api
-    active: true
+    active: false
     notes: >
-      NYC-area events via Eventbrite search API. Requires EVENTBRITE_API_TOKEN in .env.
+      Inactive — public /v3/events/search/ returns HTTP 404 (Jul 2026). Re-enable when
+      a supported org-owned or partner API endpoint exists. Requires EVENTBRITE_API_TOKEN.
+
+  - id: ticketmaster
+    name: Ticketmaster
+    url: ticketmaster://events/search
+    city: New York
+    is_national: true
+    source_quality_score: 0.85
+    source_type: api
+    active: false
+    notes: >
+      Placeholder — implement adapter and market/geo mapping in Phase 1B.3 follow-on.
+      Requires TICKETMASTER_API_KEY when enabled.
+
+  - id: seatgeek
+    name: SeatGeek
+    url: seatgeek://events/search
+    city: New York
+    is_national: true
+    source_quality_score: 0.80
+    source_type: api
+    active: false
+    notes: >
+      Placeholder — national inventory API slot. Requires SEATGEEK_CLIENT_ID when enabled.
+
+  - id: songkick
+    name: Songkick
+    url: songkick://events/search
+    city: New York
+    is_national: true
+    source_quality_score: 0.75
+    source_type: api
+    active: false
+    notes: >
+      Placeholder — national concert API slot. Requires SONGKICK_API_KEY when enabled.
+
+  # --- Retired indie / editorial / fragile sources (Phase 1C.3) ---
+
+  - id: brooklynvegan
+    name: BrooklynVegan
+    url: https://www.brooklynvegan.com/feed/
+    city: New York
+    source_quality_score: 0.85
+    active: false
+    notes: >
+      Retired — editorial music RSS; high extraction discard rate. See 260705_product_redesign.md.
 
   - id: brooklyn_rail
     name: Brooklyn Rail Events
@@ -60,7 +108,7 @@ feeds:
     city: New York
     source_quality_score: 0.80
     source_type: scrape
-    active: true
+    active: false
     scrape:
       strategy: css
       item_selector: 'div[class*="events_card"]'
@@ -69,7 +117,7 @@ feeds:
       date_selector: "p.text-xs.uppercase"
       description_selector: "span.uppercase.font-normal"
     notes: >
-      Readings, panels, and creative community events. CSS scrape verified Jun 2026.
+      Retired — fragile indie scrape; deprioritized per product redesign.
 
   - id: harlem_one_stop
     name: Harlem One Stop
@@ -77,7 +125,7 @@ feeds:
     city: New York
     source_quality_score: 0.80
     source_type: scrape
-    active: true
+    active: false
     scrape:
       strategy: css
       item_selector: 'div.tile:has(a[href^="/event/"])'
@@ -86,22 +134,22 @@ feeds:
       description_selector: "span.date b"
       date_selector: "span.date"
     notes: >
-      Harlem cultural events calendar. Homepage tiles with venue and date range.
+      Retired — fragile community scrape; deprioritized per product redesign.
 
   - id: bkmag
     name: Brooklyn Magazine
     url: https://www.bkmag.com/feed/
     city: New York
     source_quality_score: 0.55
-    active: true
+    active: false
     notes: >
-      Weekend guides and NYC lifestyle listings. Mixed editorial signal; lower quality score.
+      Retired — lifestyle editorial RSS; weak event signal per product redesign.
 
   - id: bk_reader
     name: BK Reader
     url: https://www.bkreader.com/rss/
     city: New York
     source_quality_score: 0.50
-    active: true
+    active: false
     notes: >
-      Brooklyn neighborhood news with occasional event coverage. Supplemental source.
+      Retired — neighborhood news RSS; supplemental editorial, not mainstream inventory.

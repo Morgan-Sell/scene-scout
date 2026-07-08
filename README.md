@@ -188,17 +188,19 @@ Use the cheapest tier that answers your question. Full operator guide:
 | **D** | `uat` (no `--dry-run`) | Full + Resend | Release gate — email must arrive in inbox |
 
 ```bash
-# Tier A — ingest only (~seconds)
-uv run python -m scene_scout.cli feed-probe
+# Tier A — ingest only (~seconds); default metro New York (Phase 1C)
+uv run python -m scene_scout.cli feed-probe --city "New York"
 
 # Tier B — limited smoke (optional: UAT_MAX_EXTRACTION env, --stop-after feeds|extract|…)
 uv run python -m scene_scout.cli uat \
   --prompt "Live music and free NYC shows this week" \
-  --dry-run --max-extraction 25 --feeds brooklynvegan,theskint
+  --city "New York" --horizon-days 14 \
+  --dry-run --max-extraction 25 --feeds donyc,theskint
 
-# Tier C — full integration, no send
+# Tier C — full integration, no send (uses profile home_city when onboarding complete)
 uv run python -m scene_scout.cli uat \
-  --prompt "Live music, free NYC shows, and creative community events this week" \
+  --prompt "Live music, comedy, and mainstream NYC events in the next two weeks" \
+  --city "New York" --horizon-days 14 \
   --dry-run
 ```
 
@@ -218,8 +220,10 @@ port 7860). Shared named volumes mirror Modal persistent stores.
 
 ### Configuration
 
-**Feeds** — Edit `config/feeds.yaml` to add or disable RSS sources. Each feed has an
-`id`, `url`, `city`, `source_quality_score`, and `active` flag.
+**Feeds** — Edit `config/feeds.yaml` to add or disable sources. See
+[`docs/260705_product_redesign.md`](docs/260705_product_redesign.md) for the mainstream
+catalog strategy. Each feed has `id`, `url`, `city`, optional `is_national`, `source_type`,
+`source_quality_score`, and `active`.
 
 **Environment** — Copy `.env.example` to `.env`:
 

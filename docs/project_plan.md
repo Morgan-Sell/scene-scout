@@ -240,14 +240,16 @@ to **which feeds run** and **what city national APIs query**. Two responsibiliti
 ### 1C.3 — Mainstream metro feed catalog
 **Files:** `config/feeds.yaml`, `.env.example`, docs cross-links
 **Done when:**
-- Feed catalog reflects redesign: structured mainstream sources per metro (e.g. DoNYC +
+- [ ] Feed catalog reflects redesign: structured mainstream sources per metro (e.g. DoNYC +
   metro-local listings); indie/editorial RSS and fragile scrapes removed or `active: false`
-- National platform slots (Ticketmaster, Eventbrite when a working endpoint exists) use
+- [ ] National platform slots (Ticketmaster, Eventbrite when a working endpoint exists) use
   `is_national: true`; metro scrapes/RSS keep `is_national: false` with `city` set to
   the metro name (e.g. `New York`)
-- Eventbrite search feed inactive until a working API endpoint is configured
-- `feed-probe --city` for default metro returns non-zero entries from ≥2 independent sources
-- Notes in config header point to `260705_product_redesign.md` and the `is_national` rule
+- [ ] Eventbrite search feed inactive until a working API endpoint is configured
+- [ ] `feed-probe --city` for default metro returns non-zero entries from ≥2 independent sources
+- [ ] Notes in config header point to `260705_product_redesign.md` and the `is_national` rule
+
+**Default metro smoke:** `uv run python -m scene_scout.cli feed-probe --city "New York" --allow-failures`
 
 ### 1C.4 — Structured ingest bypass (skip extraction LLM)
 **Files:** `scene_scout/orchestrator.py`, source adapters (`event_api.py`, `ical.py`, optional

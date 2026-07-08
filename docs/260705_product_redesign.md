@@ -85,14 +85,15 @@ flowchart LR
 ### Keep / add (mainstream)
 
 - **DoNYC** (or similar structured aggregator) — venue + ISO datetime on listing cards
-- **Multiple event APIs per metro** — e.g. Ticketmaster, SeatGeek, Songkick (implement incrementally; see Phase 1B.3)
+- **the skint** — curated NYC event listings (active secondary source for default metro)
+- **Multiple event APIs per metro** — e.g. Ticketmaster, SeatGeek, Songkick (implement incrementally; see Phase 1B.3). Inactive placeholder slots live in [`config/feeds.yaml`](../config/feeds.yaml).
 - **Venue ICS** where endpoints are stable and not rate-limited
 
 ### Deprioritize / remove
 
-- Editorial RSS (neighborhood news, lifestyle blogs)
-- Fragile indie scrapes (Brooklyn Rail, Harlem One Stop, etc.)
-- **Eventbrite search** — public `/v3/events/search/` returns 404; inactive until a supported endpoint exists (org-owned events or partner API)
+- Editorial RSS (BrooklynVegan, Brooklyn Magazine, BK Reader — `active: false` in feeds.yaml)
+- Fragile indie scrapes (Brooklyn Rail, Harlem One Stop — `active: false`)
+- **Eventbrite search** — public `/v3/events/search/` returns 404; `eventbrite` feed inactive until a supported endpoint exists (org-owned events or partner API)
 
 ### Unchanged from UAT work
 
