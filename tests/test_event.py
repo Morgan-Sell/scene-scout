@@ -13,10 +13,10 @@ import pytest
 from pydantic import ValidationError
 
 from scene_scout.models.event import (
+    STRUCTURED_INGEST_CONFIDENCE,
     EventCandidate,
     EventCandidateLLMOutput,
     NormalizedEvent,
-    STRUCTURED_INGEST_CONFIDENCE,
     candidate_from_structured_entry,
     compute_normalized_event_id,
     has_structured_ingest_fields,

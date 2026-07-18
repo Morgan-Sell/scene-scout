@@ -369,7 +369,10 @@ def _partition_entries_for_structured_ingest(
     run_id: str,
     logger: Any,
 ) -> tuple[list[EventCandidate], list[RawFeedEntry], int]:
-    """Split cache-miss entries into structured bypass candidates and extraction queue."""
+    """
+    Split cache-miss entries into structured bypass candidates and 
+    extraction queue.
+    """
     bypass_candidates: list[EventCandidate] = []
     entries_for_extraction: list[RawFeedEntry] = []
     bypass_count = 0
@@ -500,7 +503,10 @@ def _pre_enrichment_discard_reason(
     now: datetime,
     exclude_event_ids: set[str],
 ) -> str | None:
-    """Return a discard reason or ``None`` when the event should proceed."""
+    """
+    Return a discard reason or ``None`` when the event 
+    should proceed.
+    """
     if event.low_information:
         return DISCARD_LOW_INFORMATION
     if event.id in exclude_event_ids:
