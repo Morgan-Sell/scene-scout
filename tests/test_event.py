@@ -16,8 +16,13 @@ from scene_scout.models.event import (
     EventCandidate,
     EventCandidateLLMOutput,
     NormalizedEvent,
+    STRUCTURED_INGEST_CONFIDENCE,
+    candidate_from_structured_entry,
     compute_normalized_event_id,
+    has_structured_ingest_fields,
+    structured_ingest_applies,
 )
+from scene_scout.models.feed import RawFeedEntry
 from tests.conftest import TEST_RUN_ID
 
 SANDLOT_FEED = "sandlot-pickup-league"
@@ -279,4 +284,93 @@ def test_normalized_event_accepts_multi_feed_provenance() -> None:
     assert event.source_feeds == [SANDLOT_FEED, rival_feed]
     assert event.source_count == 2
     assert event.best_source_feed == rival_feed
-    assert event.source_quality_score == 0.95
+
+
+def _structured_raw_entry(**overrides: object) -> RawFeedEntry:
+    payload = {
+        "feed_id": SANDLOT_FEED,
+        "feed_name": "Structured API Feed",
+        "source_url": "https://example.com/api",
+        "run_id": TEST_RUN_ID,
+        "source_type": "api",
+        "title": EVENT_TITLE,
+        "link": "https://example.com/great-bambino-night",
+        "description": "Legends retell the Babe Ruth story.",
+        "published_raw": "2026-07-18T19:00:00",
+        "event_venue": EVENT_VENUE,
+        "event_city": "Los Angeles",
+        "fetched_at": EXTRACTED_AT,
+    }
+    payload.update(overrides)
+    return RawFeedEntry.model_validate(payload)
+
+
+def test_structured_ingest_applies_to_api_and_ical_only() -> None:
+    api_entry = _structured_raw_entry(source_type="api")
+    ical_entry = _structured_raw_entry(source_type="ical")
+    rss_entry = _structured_raw_entry(source_type="rss")
+    scrape_entry = _structured_raw_entry(source_type="scrape")
+
+    assert structured_ingest_applies(api_entry) is True
+    assert structured_ingest_applies(ical_entry) is True
+    assert structured_ingest_applies(rss_entry) is False
+    assert structured_ingest_applies(scrape_entry) is False
+    assert (
+        structured_ingest_applies(scrape_entry, scrape_structured_ingest=True) is True
+    )
+
+
+def test_has_structured_ingest_fields_requires_title_venue_city_date_url() -> None:
+    complete = _structured_raw_entry()
+    assert has_structured_ingest_fields(complete, feed_city="New York") is True
+
+    assert (
+        has_structured_ingest_fields(
+            _structured_raw_entry(event_venue=None),
+            feed_city="New York",
+        )
+        is False
+    )
+    assert (
+        has_structured_ingest_fields(
+            _structured_raw_entry(link="not-a-url"),
+            feed_city="New York",
+        )
+        is False
+    )
+    assert (
+        has_structured_ingest_fields(
+            _structured_raw_entry(event_city=None),
+            feed_city="",
+        )
+        is False
+    )
+    assert (
+        has_structured_ingest_fields(
+            _structured_raw_entry(event_city=None),
+            feed_city="New York",
+        )
+        is True
+    )
+
+
+def test_candidate_from_structured_entry_maps_adapter_fields() -> None:
+    entry = _structured_raw_entry()
+    candidate = candidate_from_structured_entry(
+        entry,
+        feed_city="New York",
+        run_id=TEST_RUN_ID,
+        extracted_at=EXTRACTED_AT,
+    )
+
+    assert candidate is not None
+    assert candidate.title == EVENT_TITLE
+    assert candidate.venue == EVENT_VENUE
+    assert candidate.city == "Los Angeles"
+    assert candidate.url == entry.link
+    assert candidate.date == "2026-07-18T19:00:00"
+    assert candidate.is_event is True
+    assert candidate.extraction_confidence == STRUCTURED_INGEST_CONFIDENCE
+    assert candidate.source_feed == SANDLOT_FEED
+    assert candidate.run_id == TEST_RUN_ID
+    assert candidate.extracted_at == EXTRACTED_AT

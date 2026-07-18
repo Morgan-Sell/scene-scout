@@ -195,18 +195,22 @@ def _map_eventbrite_event(
     category = event.get("category") or {}
     category_name = _text_field(category.get("name"))
     categories = [category_name] if category_name else []
+    venue = _eventbrite_venue_name(event)
 
     return RawFeedEntry(
         feed_id=config.id,
         feed_name=config.name,
         source_url=config.url,
         run_id=run_id,
+        source_type="api",
         title=name,
         link=event.get("url"),
         description=description,
         published_raw=published_raw,
         author=author,
         categories=categories,
+        event_venue=venue,
+        event_city=config.city,
         fetched_at=fetched_at,
     )
 

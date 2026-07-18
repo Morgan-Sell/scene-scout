@@ -10,10 +10,19 @@ Event domain models for SceneScout.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
+
+from scene_scout.models.feed import RawFeedEntry, SourceType
+
+STRUCTURED_INGEST_SOURCE_TYPES: frozenset[SourceType] = frozenset({"api", "ical"})
+STRUCTURED_INGEST_CONFIDENCE = 1.0
+_TRAILING_VENUE_PUNCTUATION = re.compile(r"[.,;:!?]+$")
+_WHITESPACE = re.compile(r"\s+")
 
 
 def compute_normalized_event_id(title: str, date: str, venue: str) -> str:
@@ -84,6 +93,88 @@ class EventCandidate(EventCandidateLLMOutput):
             run_id=run_id,
             extracted_at=extracted_at,
         )
+
+
+def structured_ingest_applies(
+    entry: RawFeedEntry,
+    *,
+    scrape_structured_ingest: bool = False,
+) -> bool:
+    """Return True when this entry's source type may skip the extraction LLM."""
+    if entry.source_type == "scrape":
+        return scrape_structured_ingest
+    return entry.source_type in STRUCTURED_INGEST_SOURCE_TYPES
+
+
+def _is_http_url(url: str | None) -> bool:
+    if not url or not url.strip():
+        return False
+    parsed = urlparse(url.strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _normalize_structured_venue(venue: str | None) -> str | None:
+    if venue is None:
+        return None
+    cleaned = _TRAILING_VENUE_PUNCTUATION.sub("", venue.strip())
+    cleaned = _WHITESPACE.sub(" ", cleaned).strip()
+    return cleaned or None
+
+
+def has_structured_ingest_fields(entry: RawFeedEntry, *, feed_city: str) -> bool:
+    """Return True when adapter output has fields required to skip extraction."""
+    if not entry.title or not entry.title.strip():
+        return False
+    if not _is_http_url(entry.link):
+        return False
+    if _normalize_structured_venue(entry.event_venue) is None:
+        return False
+    city = (entry.event_city or feed_city or "").strip()
+    if not city:
+        return False
+    if not (entry.published_raw or "").strip():
+        return False
+    return True
+
+
+def candidate_from_structured_entry(
+    entry: RawFeedEntry,
+    *,
+    feed_city: str,
+    run_id: str,
+    extracted_at: datetime | None = None,
+) -> EventCandidate | None:
+    """Map structured adapter output to an ``EventCandidate`` without an LLM call."""
+    if not has_structured_ingest_fields(entry, feed_city=feed_city):
+        return None
+
+    venue = _normalize_structured_venue(entry.event_venue)
+    if venue is None:
+        return None
+
+    city = (entry.event_city or feed_city).strip()
+    date_value = entry.published_raw.strip() if entry.published_raw else None
+    time_value = entry.event_time.strip() if entry.event_time else None
+
+    llm_output = EventCandidateLLMOutput(
+        title=entry.title.strip(),
+        date=date_value,
+        time=time_value,
+        venue=venue,
+        city=city,
+        url=entry.link.strip(),
+        price=None,
+        description=entry.description,
+        categories=list(entry.categories),
+        is_event=True,
+        extraction_confidence=STRUCTURED_INGEST_CONFIDENCE,
+    )
+    return EventCandidate.from_llm_output(
+        llm_output,
+        source_feed=entry.feed_id,
+        run_id=run_id,
+        extracted_at=extracted_at or datetime.now(timezone.utc),
+    )
 
 
 class NormalizedEvent(BaseModel):

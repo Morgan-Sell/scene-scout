@@ -355,17 +355,26 @@ def _map_items_to_entries(
         if not title and not link:
             continue
 
+        event_venue: Optional[str] = None
+        event_city: Optional[str] = None
+        if scrape.structured_ingest:
+            event_venue = description
+            event_city = config.city
+
         entries.append(
             RawFeedEntry(
                 feed_id=config.id,
                 feed_name=config.name,
                 source_url=config.url,
                 run_id=run_id,
+                source_type="scrape",
                 title=title,
                 link=link,
                 description=description,
                 published_raw=published_raw,
                 categories=[],
+                event_venue=event_venue,
+                event_city=event_city,
                 fetched_at=fetched_at,
             )
         )

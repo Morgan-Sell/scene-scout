@@ -27,6 +27,7 @@ class ScrapeConfig(BaseModel):
     """Per-site HTML calendar scrape configuration."""
 
     strategy: ScrapeStrategy = "css"
+    structured_ingest: bool = False
     json_url: Optional[str] = None
     discover_json_url: bool = False
     json_items_path: Optional[str] = None
@@ -184,6 +185,7 @@ class RawFeedEntry(BaseModel):
     feed_name: str
     source_url: str
     run_id: str
+    source_type: SourceType = "rss"
 
     title: Optional[str] = None
     link: Optional[str] = None
@@ -192,6 +194,9 @@ class RawFeedEntry(BaseModel):
     author: Optional[str] = None
     categories: list[str] = []
     enclosure_url: Optional[str] = None
+    event_venue: Optional[str] = None
+    event_city: Optional[str] = None
+    event_time: Optional[str] = None
 
     fetched_at: datetime
 

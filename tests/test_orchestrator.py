@@ -23,7 +23,7 @@ from scene_scout.models.event import (
     EventCandidateLLMOutput,
     NormalizedEvent,
 )
-from scene_scout.models.feed import RawFeedEntry
+from scene_scout.models.feed import FeedConfig, RawFeedEntry
 from scene_scout.models.ranking import RankedEvent
 from scene_scout.models.user import UserProfile
 from scene_scout.orchestrator import (
@@ -36,6 +36,7 @@ from scene_scout.orchestrator import (
     _batch_results_for_agent,
     _cap_extraction_entries,
     _partition_entries_by_seen_cache,
+    _partition_entries_for_structured_ingest,
     _poll_enrichment_batch,
     _resolve_user_profile,
     _seen_entries_hit_rate_pct,
@@ -557,6 +558,126 @@ async def test_orchestrator_seen_entries_cache_miss_runs_extraction_and_stores(
 
     entry_hash = compute_entry_hash(source_entry)
     assert cache.get_seen_entry(SANDLOT_FEED_ID, entry_hash) == normalized
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_structured_ingest_bypasses_extraction(
+    pipeline_state_dir: Path,
+    cache_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = CacheService(run_id=TEST_RUN_ID, db_path=cache_db)
+    structured_entry = _raw_entry(
+        source_type="api",
+        event_venue="The Sandlot",
+        event_city="Los Angeles",
+        published_raw="2026-07-18T19:00:00",
+    )
+    normalized = _normalized_event()
+
+    mock_extraction = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.feed_scout.run",
+        AsyncMock(return_value=([structured_entry], [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_extraction.run",
+        mock_extraction,
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_normalization.run",
+        AsyncMock(return_value=[normalized]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.CacheService",
+        lambda run_id, db_path=None: cache,
+    )
+
+    result = await Orchestrator().run(SANDLOT_PROMPT)
+
+    assert result.seen_entries_cache_misses == 1
+    assert result.structured_ingest_bypass_count == 1
+    assert result.extraction_candidates == 1
+    mock_extraction.assert_not_awaited()
+
+    entry_hash = compute_entry_hash(structured_entry)
+    assert cache.get_seen_entry(SANDLOT_FEED_ID, entry_hash) == normalized
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_incomplete_structured_entry_uses_extraction(
+    pipeline_state_dir: Path,
+    cache_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = CacheService(run_id=TEST_RUN_ID, db_path=cache_db)
+    thin_api_entry = _raw_entry(
+        source_type="api",
+        event_venue=None,
+        published_raw="2026-07-18T19:00:00",
+    )
+    candidate = _event_candidate()
+    normalized = _normalized_event()
+
+    mock_extraction = AsyncMock(return_value=[candidate])
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.feed_scout.run",
+        AsyncMock(return_value=([thin_api_entry], [])),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_extraction.run",
+        mock_extraction,
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.event_normalization.run",
+        AsyncMock(return_value=[normalized]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.CacheService",
+        lambda run_id, db_path=None: cache,
+    )
+
+    result = await Orchestrator().run(SANDLOT_PROMPT)
+
+    assert result.structured_ingest_bypass_count == 0
+    assert result.extraction_candidates == 1
+    mock_extraction.assert_awaited_once()
+
+
+def test_partition_entries_for_structured_ingest_splits_bypass_and_extraction() -> None:
+    logger = get_logger("orchestrator", run_id=TEST_RUN_ID)
+    feed_by_id = {
+        SANDLOT_FEED_ID: FeedConfig(
+            id=SANDLOT_FEED_ID,
+            name="Structured Scrape",
+            url="https://example.com/events",
+            city="New York",
+            source_quality_score=0.8,
+            source_type="scrape",
+            scrape={"strategy": "css", "structured_ingest": True},
+        )
+    }
+    bypass_entry = _raw_entry(
+        source_type="scrape",
+        event_venue="The Sandlot",
+        event_city="New York",
+        published_raw="2026-07-18T19:00:00",
+    )
+    rss_entry = _raw_entry(source_type="rss")
+
+    bypass_candidates, extraction_entries, bypass_count = (
+        _partition_entries_for_structured_ingest(
+            [bypass_entry, rss_entry],
+            feed_by_id,
+            TEST_RUN_ID,
+            logger,
+        )
+    )
+
+    assert bypass_count == 1
+    assert len(bypass_candidates) == 1
+    assert bypass_candidates[0].source_feed == SANDLOT_FEED_ID
+    assert extraction_entries == [rss_entry]
 
 
 @pytest.mark.asyncio
