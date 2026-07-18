@@ -92,6 +92,9 @@ async def test_vevent_fields_mapped_to_raw_feed_entry():
     assert first.published_raw == "2026-07-13T15:00:00+00:00"
     assert first.author == "Library Programs"
     assert "Storytime" in first.categories
+    assert first.source_type == "ical"
+    assert first.event_venue == "Brooklyn Public Library - Brower Park Library"
+    assert first.event_city == "New York"
     assert first.feed_id == "ical_test"
     assert first.run_id == TEST_RUN_ID
     assert isinstance(first.fetched_at, datetime)

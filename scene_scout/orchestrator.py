@@ -42,8 +42,13 @@ from scene_scout.config import (
 from scene_scout.db import run_migrations
 from scene_scout.logging import get_logger
 from scene_scout.models.enrichment import EnrichedEvent
-from scene_scout.models.event import NormalizedEvent
-from scene_scout.models.feed import FeedStatus, RawFeedEntry
+from scene_scout.models.event import (
+    EventCandidate,
+    NormalizedEvent,
+    candidate_from_structured_entry,
+    structured_ingest_applies,
+)
+from scene_scout.models.feed import FeedConfig, FeedStatus, RawFeedEntry
 from scene_scout.models.ranking import RankedEvent
 from scene_scout.models.user import UserProfile
 from scene_scout.orchestrator_config import (
@@ -154,7 +159,9 @@ class PipelineResult:
     seen_entries_hit_rate_pct : float
         Percentage of raw entries served from ``seen_entries`` cache (0–100).
     extraction_candidates : int
-        Event candidates returned by the Extraction Agent.
+        Event candidates returned by the Extraction Agent and structured ingest bypass.
+    structured_ingest_bypass_count : int
+        Cache-miss entries mapped to candidates without an extraction LLM call.
     normalized_events : int
         Events returned by the Normalization Agent.
     deduplicated_events : int
@@ -201,6 +208,7 @@ class PipelineResult:
     seen_entries_cache_misses: int = 0
     seen_entries_hit_rate_pct: float = 0.0
     extraction_candidates: int = 0
+    structured_ingest_bypass_count: int = 0
     normalized_events: int = 0
     deduplicated_events: int = 0
     after_description_quality: int = 0
@@ -355,6 +363,58 @@ def _partition_entries_by_seen_cache(
     return cached_events, entries_for_extraction, hits, misses
 
 
+def _partition_entries_for_structured_ingest(
+    entries: list[RawFeedEntry],
+    feed_by_id: dict[str, FeedConfig],
+    run_id: str,
+    logger: Any,
+) -> tuple[list[EventCandidate], list[RawFeedEntry], int]:
+    """
+    Split cache-miss entries into structured bypass candidates and
+    extraction queue.
+    """
+    bypass_candidates: list[EventCandidate] = []
+    entries_for_extraction: list[RawFeedEntry] = []
+    bypass_count = 0
+
+    for entry in entries:
+        feed = feed_by_id.get(entry.feed_id)
+        scrape_structured = bool(
+            feed is not None
+            and feed.scrape is not None
+            and feed.scrape.structured_ingest
+        )
+        if not structured_ingest_applies(
+            entry,
+            scrape_structured_ingest=scrape_structured,
+        ):
+            entries_for_extraction.append(entry)
+            continue
+
+        feed_city = feed.city if feed is not None else ""
+        candidate = candidate_from_structured_entry(
+            entry,
+            feed_city=feed_city,
+            run_id=run_id,
+        )
+        if candidate is None:
+            entries_for_extraction.append(entry)
+            continue
+
+        bypass_candidates.append(candidate)
+        bypass_count += 1
+        logger.info(
+            "Structured ingest bypass",
+            data={
+                "feed_id": entry.feed_id,
+                "entry_title": entry.title,
+                "source_type": entry.source_type,
+            },
+        )
+
+    return bypass_candidates, entries_for_extraction, bypass_count
+
+
 def _find_source_entry(
     candidate: Any,
     entries: list[RawFeedEntry],
@@ -443,7 +503,10 @@ def _pre_enrichment_discard_reason(
     now: datetime,
     exclude_event_ids: set[str],
 ) -> str | None:
-    """Return a discard reason or ``None`` when the event should proceed."""
+    """
+    Return a discard reason or ``None`` when the event
+    should proceed.
+    """
     if event.low_information:
         return DISCARD_LOW_INFORMATION
     if event.id in exclude_event_ids:
@@ -989,10 +1052,21 @@ class Orchestrator:
 
         (
             cached_events,
-            entries_for_extraction,
+            cache_miss_entries,
             cache_hits,
             cache_misses,
         ) = _partition_entries_by_seen_cache(entries, cache, logger)
+        feed_by_id = {config.id: config for config in feed_configs}
+        (
+            bypass_candidates,
+            entries_for_extraction,
+            bypass_count,
+        ) = _partition_entries_for_structured_ingest(
+            cache_miss_entries,
+            feed_by_id,
+            run_id,
+            logger,
+        )
         entries_for_extraction = _cap_extraction_entries(
             entries_for_extraction,
             uat_options.max_extraction,
@@ -1004,11 +1078,16 @@ class Orchestrator:
             cache_hits,
             cache_misses,
         )
+        result.structured_ingest_bypass_count = bypass_count
 
         if entries_for_extraction:
-            candidates = await event_extraction.run(entries_for_extraction, run_id)
+            extracted_candidates = await event_extraction.run(
+                entries_for_extraction,
+                run_id,
+            )
         else:
-            candidates = []
+            extracted_candidates = []
+        candidates = bypass_candidates + extracted_candidates
         result.extraction_candidates = len(candidates)
         _write_uat_stage_checkpoint(uat_dir, result, "extraction")
 
@@ -1022,7 +1101,7 @@ class Orchestrator:
                 cache,
                 candidates,
                 newly_normalized,
-                entries_for_extraction,
+                cache_miss_entries,
             )
 
         normalized = cached_events + newly_normalized
@@ -1168,6 +1247,7 @@ class Orchestrator:
                 "seen_entries_cache_hits": result.seen_entries_cache_hits,
                 "seen_entries_cache_misses": result.seen_entries_cache_misses,
                 "seen_entries_hit_rate_pct": result.seen_entries_hit_rate_pct,
+                "structured_ingest_bypass_count": result.structured_ingest_bypass_count,
                 "after_pre_enrichment_filter": result.after_pre_enrichment_filter,
                 "enrichment_cache_hit_rates_pct": result.enrichment_cache_hit_rates_pct,
                 "pre_enrichment_discards": {

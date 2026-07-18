@@ -95,6 +95,9 @@ async def test_eventbrite_fields_mapped_to_raw_feed_entry(eventbrite_token):
     assert first.published_raw == "2026-07-18T19:00:00"
     assert first.author == "Neighborhood Events Co"
     assert first.categories == ["Music"]
+    assert first.source_type == "api"
+    assert first.event_venue == "Neighborhood Ball Field"
+    assert first.event_city == "New York"
     assert first.feed_id == "eventbrite_test"
     assert first.run_id == TEST_RUN_ID
     assert isinstance(first.fetched_at, datetime)

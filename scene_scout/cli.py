@@ -257,6 +257,10 @@ def print_uat_summary(result: PipelineResult) -> None:
         f"{result.seen_entries_hit_rate_pct:.1f}%",
     )
     pipeline_table.add_row("Extraction candidates", str(result.extraction_candidates))
+    pipeline_table.add_row(
+        "Structured ingest bypass",
+        str(result.structured_ingest_bypass_count),
+    )
     pipeline_table.add_row("Normalized events", str(result.normalized_events))
     pipeline_table.add_row("After deduplication", str(result.deduplicated_events))
     pipeline_table.add_row(

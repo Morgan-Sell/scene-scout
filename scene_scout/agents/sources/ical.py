@@ -266,18 +266,22 @@ def _parse_vevent(
     published_raw = _format_dtstart(component.get("dtstart"))
     author = _decode_organizer(component.get("organizer"))
     categories = _decode_categories(component.get("categories"))
+    location = _decode_text(component.get("location"))
 
     return RawFeedEntry(
         feed_id=config.id,
         feed_name=config.name,
         source_url=config.url,
         run_id=run_id,
+        source_type="ical",
         title=summary,
         link=link,
         description=description,
         published_raw=published_raw,
         author=author,
         categories=categories,
+        event_venue=location,
+        event_city=config.city,
         fetched_at=fetched_at,
     )
 

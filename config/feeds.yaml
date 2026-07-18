@@ -35,6 +35,7 @@ feeds:
     active: true
     scrape:
       strategy: css
+      structured_ingest: true
       item_selector: ".event-card"
       title_selector: ".ds-listing-event-title-text"
       link_selector: "a.ds-listing-event-title"
