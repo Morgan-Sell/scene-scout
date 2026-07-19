@@ -294,6 +294,19 @@ def _fetch_entry_by_feedback_token(
     return _row_to_entry(row)
 
 
+def get_entry_by_feedback_token(
+    feedback_token: str,
+    *,
+    conn: Connection | None = None,
+) -> RecommendationHistoryEntry | None:
+    """Return the recommendation history row for ``feedback_token``, if any."""
+    if conn is not None:
+        return _fetch_entry_by_feedback_token(feedback_token, conn=conn)
+
+    with _get_engine().connect() as connection:
+        return _fetch_entry_by_feedback_token(feedback_token, conn=connection)
+
+
 def update_feedback(
     feedback_token: str,
     signal: FeedbackSignal,
