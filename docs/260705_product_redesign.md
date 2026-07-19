@@ -9,8 +9,9 @@ documented in interim UAT feed work ([`260629_uat_debug_plan.md`](260629_uat_deb
 UAT-D.8/D.11). That UAT plan is **complete**; its pipeline fixes remain valid.
 
 **Phase 1C (Jul 2026):** Personalized mainstream discovery — `UserProfile.home_city` /
-`horizon_days`, city-scoped feeds, structured ingest bypass, user horizon windows. See
-[Phase 1C](project_plan.md) for subphase checklist.
+`horizon_days`, city-scoped feeds, structured ingest bypass, user horizon windows,
+Ticketmaster national API (`1C.7`), structured category inference on scrape/API bypass rows.
+See [Phase 1C](project_plan.md) for subphase checklist.
 
 ---
 
@@ -89,7 +90,9 @@ flowchart LR
 ### Keep / add (mainstream)
 
 - **DoNYC** (or similar structured aggregator) — venue + ISO datetime on listing cards
-- **Multiple event APIs per metro** — e.g. Ticketmaster, SeatGeek, Songkick (implement incrementally; see Phase 1B.3)
+- **Ticketmaster Discovery API** — national feed (`is_national: true`); geo-scoped via
+  `profile.home_city`; requires `TICKETMASTER_API_KEY` (Phase 1C.7)
+- **Multiple event APIs per metro** — e.g. SeatGeek, Songkick (implement incrementally; see Phase 1B.3)
 - **Venue ICS** where endpoints are stable and not rate-limited
 
 ### Deprioritize / remove
@@ -145,12 +148,14 @@ rm -f vol-profiles/profile.json
 rm -f vol-cache/cache.db
 ```
 
-**Mainstream feed subset** (structured DoNYC + RSS the skint; skips inactive/broken API
-slots):
+**Mainstream feed subset** (structured DoNYC + Ticketmaster + RSS the skint):
 
 ```bash
-FEEDS=donyc,theskint
+FEEDS=donyc,theskint,ticketmaster
 ```
+
+Set `TICKETMASTER_API_KEY` in `.env` for Ticketmaster rows. Omit `ticketmaster` from
+`FEEDS` to run without the national API.
 
 Do **not** use `--max-extraction` for this demo — it caps cache-miss rows sent to the
 extraction LLM and can hide catalog gaps. Reserve `--max-extraction N` for Tier B cost
@@ -220,7 +225,7 @@ Align **city**, **horizon**, and **feeds** on every tier. Default mainstream NYC
 |---|---|
 | `--city` / `UAT_HOME_CITY` | `New York` |
 | `--horizon-days` / `UAT_HORIZON_DAYS` | `14` (or 7–30) |
-| `--feeds` | `donyc,theskint` |
+| `--feeds` | `donyc,theskint,ticketmaster` |
 
 **Tier A — ingest only (~seconds, no LLM):**
 
@@ -244,7 +249,7 @@ uv run python -m scene_scout.cli uat \
   --dry-run \
   --city "New York" \
   --horizon-days 14 \
-  --feeds donyc,theskint \
+  --feeds donyc,theskint,ticketmaster \
   --stop-after normalize
 ```
 
@@ -256,17 +261,37 @@ uv run python -m scene_scout.cli uat \
   --dry-run \
   --city "New York" \
   --horizon-days 14 \
-  --feeds donyc,theskint
+  --feeds donyc,theskint,ticketmaster
 ```
 
 **Pass criteria:** `summary.json` → `normalized_events` > 0 with mainstream feeds and user
 horizon aligned. Target `curated_recommendations` > 0 when enrichment and ranking complete.
+With Ticketmaster enabled, expect **more normalized/enriched events** than
+`donyc,theskint` alone (API rows bypass extraction and carry categories).
 
 Verified Jul 2026 (Tier B, `--stop-after normalize`): 25 DoNYC rows → 5 normalized events
-with `--city "New York"`, `--horizon-days 14`, `--feeds donyc,theskint`.
+with `--city "New York"`, `--horizon-days 14`, `--feeds donyc,theskint`. Phase 1C.7 adds
+Ticketmaster for catalog depth.
 
 **Tier D:** Same as Tier C without `--dry-run`; requires Resend + `USER_EMAIL` (release
 gate).
+
+---
+
+## Phase 1C.7 — Mainstream catalog depth
+
+**Goal:** Increase UAT catalog size and make structured-ingest personalization meaningful.
+
+| Deliverable | Detail |
+|---|---|
+| **Ticketmaster adapter** | `event_api.py` + `ticketmaster` slot in `feeds.yaml` (`is_national: true`, `active: true`) |
+| **Structured categories** | Keyword inference on DoNYC/scrape bypass rows when adapters omit category labels |
+| **Env** | `TICKETMASTER_API_KEY` in `.env` (see `.env.example`) |
+| **UAT default feeds** | `donyc,theskint,ticketmaster` |
+
+**Pass criteria:** `feed-probe --city "New York"` shows Ticketmaster entries when keyed;
+UAT with the three-feed default yields materially more normalized/enriched events than
+`donyc,theskint` alone.
 
 ---
 

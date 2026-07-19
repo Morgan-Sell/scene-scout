@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field, field_validator
 
 from scene_scout.models.feed import RawFeedEntry, SourceType
+from scene_scout.structured_categories import infer_categories_from_text
 
 STRUCTURED_INGEST_SOURCE_TYPES: frozenset[SourceType] = frozenset({"api", "ical"})
 STRUCTURED_INGEST_CONFIDENCE = 1.0
@@ -155,6 +156,12 @@ def candidate_from_structured_entry(
     city = (entry.event_city or feed_city).strip()
     date_value = entry.published_raw.strip() if entry.published_raw else None
     time_value = entry.event_time.strip() if entry.event_time else None
+    categories = list(entry.categories)
+    if not categories:
+        categories = infer_categories_from_text(
+            title=entry.title,
+            description=entry.description,
+        )
 
     llm_output = EventCandidateLLMOutput(
         title=entry.title.strip(),
@@ -165,7 +172,7 @@ def candidate_from_structured_entry(
         url=entry.link.strip(),
         price=None,
         description=entry.description,
-        categories=list(entry.categories),
+        categories=categories,
         is_event=True,
         extraction_confidence=STRUCTURED_INGEST_CONFIDENCE,
     )

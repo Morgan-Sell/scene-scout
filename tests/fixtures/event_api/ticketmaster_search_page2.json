@@ -1,0 +1,43 @@
+{
+  "_embedded": {
+    "events": [
+      {
+        "name": "Page Two Showcase",
+        "url": "https://www.ticketmaster.com/page-two-showcase/event/PAGE2EVENT",
+        "dates": {
+          "start": {
+            "localDate": "2026-07-20",
+            "localTime": "21:00:00",
+            "dateTime": "2026-07-20T21:00:00Z"
+          }
+        },
+        "_embedded": {
+          "venues": [
+            {
+              "name": "Second Stage",
+              "city": {
+                "name": "New York"
+              }
+            }
+          ]
+        },
+        "classifications": [
+          {
+            "segment": {
+              "name": "Music"
+            },
+            "genre": {
+              "name": "Alternative"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "page": {
+    "size": 20,
+    "totalElements": 3,
+    "totalPages": 2,
+    "number": 1
+  }
+}

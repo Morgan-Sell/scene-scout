@@ -172,7 +172,7 @@ uv run python -m scene_scout.cli uat \
   --dry-run \
   --city "New York" \
   --horizon-days 14 \
-  --feeds donyc,theskint
+  --feeds donyc,theskint,ticketmaster
 ```
 
 UAT writes per-run output to `output/uat_{run_id}/summary.json` with stage counts
@@ -185,7 +185,8 @@ Use the cheapest tier that answers your question. Full operator guide:
 and [`docs/260629_uat_debug_plan.md`](docs/260629_uat_debug_plan.md) (historical UAT-D fixes).
 
 **Defaults for mainstream NYC:** `--city "New York"`, `--horizon-days 14`,
-`--feeds donyc,theskint` (or `UAT_HOME_CITY` / `UAT_HORIZON_DAYS` in `.env`).
+`--feeds donyc,theskint,ticketmaster` (or `UAT_HOME_CITY` / `UAT_HORIZON_DAYS` in `.env`).
+Set `TICKETMASTER_API_KEY` for the national API feed.
 
 | Tier | Command | LLM | Typical use |
 |---|---|---|---|
@@ -208,7 +209,7 @@ uv run python -m scene_scout.cli uat \
   --dry-run \
   --city "New York" \
   --horizon-days 14 \
-  --feeds donyc,theskint \
+  --feeds donyc,theskint,ticketmaster \
   --stop-after normalize
 
 # Tier C — full integration, no send (personalization acceptance demo: see redesign doc)
@@ -217,7 +218,7 @@ uv run python -m scene_scout.cli uat \
   --dry-run \
   --city "New York" \
   --horizon-days 14 \
-  --feeds donyc,theskint
+  --feeds donyc,theskint,ticketmaster
 ```
 
 Key artifacts: `output/uat_{run_id}/summary.json` (funnel counts; `status: partial` on

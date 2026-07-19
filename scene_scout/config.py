@@ -129,6 +129,11 @@ def get_eventbrite_api_token() -> str | None:
     return os.getenv("EVENTBRITE_API_TOKEN")
 
 
+def get_ticketmaster_api_key() -> str | None:
+    """Return the Ticketmaster Discovery API key for event search calls."""
+    return os.getenv("TICKETMASTER_API_KEY")
+
+
 RESEND_API_KEY: str | None = os.getenv("RESEND_API_KEY")
 RESEND_FROM_EMAIL: str | None = os.getenv("RESEND_FROM_EMAIL") or os.getenv(
     "FROM_EMAIL"
