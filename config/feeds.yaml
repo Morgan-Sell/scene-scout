@@ -7,7 +7,8 @@
 # is_national: true — always included for every user; national API adapters query
 #   using profile.home_city (not feed.city). Use for Ticketmaster, Eventbrite, etc.
 # Only working event sources belong here — remove entries that cannot ingest.
-# Tier B/C smoke default: brooklynvegan,theskint (see docs/260629_uat_debug_plan.md).
+# Tier B/C UAT default (mainstream NYC): donyc,theskint — see docs/260705_product_redesign.md
+# Always pass --city and --horizon-days on UAT to match UserProfile (or set UAT_* env vars).
 
 feeds:
   - id: brooklynvegan
@@ -51,9 +52,10 @@ feeds:
     is_national: true
     source_quality_score: 0.70
     source_type: api
-    active: true
+    active: false
     notes: >
-      NYC-area events via Eventbrite search API. Requires EVENTBRITE_API_TOKEN in .env.
+      NYC-area events via Eventbrite search API. Inactive: public search endpoint returns
+      404 until a supported API path is configured. Requires EVENTBRITE_API_TOKEN.
 
   - id: brooklyn_rail
     name: Brooklyn Rail Events
