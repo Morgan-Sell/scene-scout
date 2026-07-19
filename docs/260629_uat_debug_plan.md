@@ -4,6 +4,13 @@
 Product and feed strategy after this work are superseded by
 [`260705_product_redesign.md`](260705_product_redesign.md).
 
+**Phase 1C (Jul 2026):** Personalized mainstream discovery shipped in code (`home_city`,
+`horizon_days`, city-scoped feeds, structured ingest bypass, user horizon windows).
+UAT examples and the personalization acceptance demo live in the redesign doc and
+[`README.md`](../README.md) — use `--city "New York"`, `--horizon-days 14`, and
+`--feeds donyc,theskint` for Tier B/C instead of the legacy `brooklynvegan,theskint`
+defaults below.
+
 **Incident run:** `20260629-013422`
 
 This plan documents fixes and enhancements triggered by the first full dry-run UAT after
@@ -334,21 +341,16 @@ extraction LLM is skipped for entries already normalized in a prior run. Clear o
 
 ```bash
 # Tier A — ingest only (~seconds)
-uv run python -m scene_scout.cli feed-probe
+uv run python -m scene_scout.cli feed-probe --city "New York"
 
-# Tier B — limited pipeline smoke
-uv run python -m scene_scout.cli uat \
-  --prompt "Live music and free NYC shows this week" \
-  --dry-run --max-extraction 25 --feeds brooklynvegan,theskint
-
-# Tier C — full integration, no email send
-uv run python -m scene_scout.cli uat \
-  --prompt "Live music, free NYC shows, and creative community events this week" \
-  --dry-run
+# Tier B/C — see 260705_product_redesign.md (donyc,theskint + --city + --horizon-days)
+# Legacy examples (pre–Phase 1C):
+# uv run python -m scene_scout.cli uat ... --feeds brooklynvegan,theskint --max-extraction 25
 
 # Tier D — release gate (requires RESEND_* and USER_EMAIL)
 uv run python -m scene_scout.cli uat \
-  --prompt "Live music, free NYC shows, and creative community events this week"
+  --prompt "Live music and free NYC events this week" \
+  --city "New York" --horizon-days 14 --feeds donyc,theskint
 ```
 
 ---
@@ -369,7 +371,9 @@ feeds active after live verification.
 | Pending sources (BAC, Artforum, Nonsense NYC, West Harlem Arts, Eventbrite) | No working ingest yet | **Not in config** — research table only |
 | LibCal / OMR / BPL / Dance/NYC (removed) | Class-series skew, 401 API, dead feeds | **Deleted from config** |
 
-**Tier B/C default feed set:** `brooklynvegan,theskint` (+ `brooklyn_rail,harlem_one_stop` when running full creative-community ingest).
+**Tier B/C default feed set (historical):** `brooklynvegan,theskint` (+ scrape feeds when
+healthy). **Current mainstream default (Phase 1C):** `donyc,theskint` with
+`--city "New York"` and `--horizon-days 14` — see redesign doc.
 
 **Done when:** Decisions recorded; config/adapter changes merged independently of UAT-D.1–D.4.
 

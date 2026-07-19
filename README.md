@@ -1,23 +1,23 @@
 # SceneScout
 
-A personalized, location-agnostic event discovery agent. It reads RSS feeds, extracts
-and normalizes event data, enriches records with performer intelligence and hyper-local
-context, ranks events against your taste profile, and delivers a curated weekly top 10
-recommendation email.
+A personalized, location-agnostic event discovery agent. It ingests mainstream event
+sources for a chosen U.S. metro, extracts or bypasses extraction for structured rows,
+normalizes and deduplicates events, enriches records with performer intelligence and
+hyper-local context, ranks them against your taste profile, and delivers a curated weekly
+top 10 recommendation email.
 
 SceneScout is a multi-agent application and a hands-on learning project in applied
 agentic AI development, DevOps, and backend engineering.
 
-**Current milestone:** Phases 1–5 are complete — ingest through enrichment runs end-to-end
-in the orchestrator (with Feed Scout still stubbed for UAT). Ranking, email delivery,
-and the feedback loop are next.
+**Current milestone:** Phases 1–7 and **Phase 1C** (personalized mainstream discovery) are
+wired end-to-end. Phase 8 behavioral profile updates from clicks are planned next.
 
 ## What it does
 
-1. **Ingest** — Fetch configured RSS feeds with HTTP change detection (ETag / 304)
+1. **Ingest** — Fetch city-scoped feeds (RSS, scrape, API, iCal) with HTTP change detection
 2. **Cache** — Skip re-extraction for entries seen in prior runs (`seen_entries`)
-3. **Extract** — LLM converts raw feed entries into structured event candidates
-4. **Normalize** — Parse dates, clean venues, validate URLs, assign stable IDs
+3. **Extract or bypass** — LLM extraction for thin RSS rows; structured ingest skips LLM
+4. **Normalize** — Parse dates, clean venues, validate URLs; filter to user horizon
 5. **Deduplicate** — Collapse exact and fuzzy duplicates; merge cross-feed provenance
 6. **Score quality** — Deterministic rubric flags sparse / low-information records
 7. **Filter** — Drop low-quality and out-of-window events before enrichment
@@ -32,7 +32,9 @@ diagram (synced with [`docs/architecture.md`](docs/architecture.md)).
 
 ## Personalization
 
-SceneScout uses a two-phase personalization model:
+SceneScout uses a two-phase personalization model. **Acceptance demo (Run A → profile
+update → Run B):**
+[`docs/260705_product_redesign.md`](docs/260705_product_redesign.md#personalization-acceptance-demo).
 
 - **Cold start:** You write a prompt describing your interests and constraints. The User
   Preference Agent parses this into a structured profile and uses it immediately.
@@ -50,19 +52,19 @@ degrade gracefully; infrastructure failures fail fast.
 
 | Agent | Responsibility | Status |
 |---|---|---|
-| Feed Scout | Fetch and parse RSS; ETag/304; feed health reports | Implemented *(orchestrator stub — wired in Phase 7)* |
+| Feed Scout | Multi-source fetch; ETag/304; feed health reports | Implemented |
 | Event Extraction | LLM extraction → `EventCandidate`; discard non-events | Implemented |
-| Event Normalization | Parse dates, clean venues, IDs, 7-day window filter | Implemented |
+| Event Normalization | Parse dates, clean venues, IDs; user horizon window | Implemented |
 | Deduplication | Exact ID + fuzzy merge; union `source_feeds` / `source_count` | Implemented |
 | Description Quality | Deterministic rubric → `description_quality_score`, `low_information` | Implemented |
 | Talent Scout | Named performers; `performer_cache`; batch LLM | Implemented |
 | Vibe Classifier | 2–5 tags from controlled vocabulary; `vibe_cache` | Implemented |
 | Neighborhood Scout | Geocoding + POI context; `venue_cache`; batch LLM | Implemented |
-| User Preference | Parse cold-start prompt; apply feedback deltas | Planned (Phase 6–8) |
-| Ranking | Deterministic score + LLM explanation; Chroma similarity | Planned (Phase 6) |
-| Sell-Out Risk | Urgency notes for high-risk events | Planned (Phase 9) |
-| Recommendation Curator (Allegra) | Top 10 with diversity rules + wildcard | Planned (Phase 6) |
-| Email Composer | HTML email via Resend; tracking links | Planned (Phase 7) |
+| User Preference | Parse cold-start prompt; city + horizon on profile | Implemented |
+| Ranking | Deterministic score + LLM explanation; Chroma similarity | Implemented |
+| Sell-Out Risk | Urgency notes for high-risk events | Implemented |
+| Recommendation Curator (Allegra) | Top 10 with diversity rules + wildcard | Implemented |
+| Email Composer | HTML email via Resend; tracking links | Implemented |
 | Evaluation | Post-send quality report | Planned (Phase 9) |
 
 Full specs: [`docs/architecture.md`](docs/architecture.md). Milestone plan:
@@ -101,8 +103,7 @@ Persistent volumes (local dev via env vars; production on Modal): `vol-cache`,
   using geocoded coordinates (Mode A) or venue-name fallback (Mode B)
 - **Explanation per recommendation** — Grounded in score breakdown, not generic prose
   *(planned — Phase 6)*
-- **Feedback loop** — "Not for me" and click tracking update your profile over time
-  *(planned — Phase 8)*
+- **Feedback loop** — Click logging exists; decay-weighted profile updates *(Phase 8)*
 - **Recommendation memory** — History store avoids repeating recent picks *(planned — Phase 6)*
 - **Web UI** — FastAPI onboarding and profile viewer; Dev Section planned (Phase 10)
 
@@ -165,11 +166,13 @@ uv run ruff format --check scene_scout tests
 ### Run the pipeline locally
 
 ```bash
-# Dry run — no email; full pipeline with live feeds (requires LLM_API_KEY)
-uv run python -m scene_scout.cli uat --prompt "jazz and outdoor events" --dry-run
-
-# Verbose agent logs
-uv run python -m scene_scout.cli uat --prompt "..." --dry-run --verbose
+# Dry run — no email; set UAT_HOME_CITY / UAT_HORIZON_DAYS or pass flags (see Tier C)
+uv run python -m scene_scout.cli uat \
+  --prompt "Live music and free NYC events" \
+  --dry-run \
+  --city "New York" \
+  --horizon-days 14 \
+  --feeds donyc,theskint
 ```
 
 UAT writes per-run output to `output/uat_{run_id}/summary.json` with stage counts
@@ -178,28 +181,43 @@ UAT writes per-run output to `output/uat_{run_id}/summary.json` with stage count
 ### Tiered UAT
 
 Use the cheapest tier that answers your question. Full operator guide:
-[`docs/260629_uat_debug_plan.md` — UAT-D.7](docs/260629_uat_debug_plan.md).
+[`docs/260705_product_redesign.md`](docs/260705_product_redesign.md) (Tier B/C + personalization demo)
+and [`docs/260629_uat_debug_plan.md`](docs/260629_uat_debug_plan.md) (historical UAT-D fixes).
+
+**Defaults for mainstream NYC:** `--city "New York"`, `--horizon-days 14`,
+`--feeds donyc,theskint` (or `UAT_HOME_CITY` / `UAT_HORIZON_DAYS` in `.env`).
 
 | Tier | Command | LLM | Typical use |
 |---|---|---|---|
-| **A** | `feed-probe` | No | Ingest health after feed/config changes |
-| **B** | `uat --dry-run --max-extraction N --feeds …` | Limited | Pipeline smoke (extract → normalize) |
-| **C** | `uat --dry-run` | Full | Pre-release integration; writes `email_preview.html` |
+| **A** | `feed-probe --city "New York"` | No | Ingest health after feed/config changes |
+| **B** | `uat --dry-run --stop-after normalize --feeds …` | Limited | Pipeline smoke through normalization |
+| **C** | `uat --dry-run --city … --horizon-days … --feeds …` | Full | Pre-release integration; `email_preview.html` |
 | **D** | `uat` (no `--dry-run`) | Full + Resend | Release gate — email must arrive in inbox |
+
+**`--max-extraction N`:** Caps cache-miss rows sent to extraction — use **only** when
+testing LLM cost limits. It hides most of the catalog and is unsuitable for validating
+non-zero `normalized_events` on mainstream feeds.
 
 ```bash
 # Tier A — ingest only (~seconds)
-uv run python -m scene_scout.cli feed-probe
+uv run python -m scene_scout.cli feed-probe --city "New York"
 
-# Tier B — limited smoke (optional: UAT_MAX_EXTRACTION env, --stop-after feeds|extract|…)
+# Tier B — smoke through normalization (no --max-extraction unless testing cost caps)
 uv run python -m scene_scout.cli uat \
-  --prompt "Live music and free NYC shows this week" \
-  --dry-run --max-extraction 25 --feeds brooklynvegan,theskint
+  --prompt "Live music and free NYC events this week" \
+  --dry-run \
+  --city "New York" \
+  --horizon-days 14 \
+  --feeds donyc,theskint \
+  --stop-after normalize
 
-# Tier C — full integration, no send
+# Tier C — full integration, no send (personalization acceptance demo: see redesign doc)
 uv run python -m scene_scout.cli uat \
-  --prompt "Live music, free NYC shows, and creative community events this week" \
-  --dry-run
+  --prompt "Live music, comedy, and free NYC events in the next two weeks" \
+  --dry-run \
+  --city "New York" \
+  --horizon-days 14 \
+  --feeds donyc,theskint
 ```
 
 Key artifacts: `output/uat_{run_id}/summary.json` (funnel counts; `status: partial` on
@@ -230,6 +248,8 @@ port 7860). Shared named volumes mirror Modal persistent stores.
 | `LLM_API_KEY` | Provider API key |
 | `LLM_API_BASE` | Optional — Ollama or custom endpoint |
 | `WEB_PASSWORD` | Web UI HTTP Basic auth password (optional; disabled when unset) |
+| `UAT_HOME_CITY` | Default metro when no persisted profile (e.g. `New York`) |
+| `UAT_HORIZON_DAYS` | Default search horizon when no persisted profile (1–60) |
 | `VOL_*_DIR` | Override local volume paths (defaults under project root) |
 
 Use `--dry-run` on the CLI to run the pipeline without sending email. Full UAT with a
@@ -267,15 +287,18 @@ orchestrator. Feed Scout, ranking, and email are wired for UAT; evaluation remai
 
 - Full agent implementations for feed fetch, extraction, normalization, deduplication,
   description quality, and all three enrichment scouts
+- City-scoped feeds, user horizon windows, structured ingest bypass (Phase 1C)
 - Orchestrator runs extraction → filter → enrichment batch submit/poll/apply with
   `PipelineState` persistence at the batch boundary
 - SQLite caches for ETags, seen entries, performers, venues, and vibes
 - Geocoding service with Nominatim rate limiting and Overpass POI lookup
-- 240+ passing tests with mocked LLM/HTTP and enrichment golden fixtures
+- 508 passing tests with mocked LLM/HTTP and enrichment golden fixtures
 
 ### What's next
 
-- Run live UAT: `uv run python -m scene_scout.cli uat --prompt "..." --dry-run` (needs `LLM_API_KEY`)
+- Run live UAT: Tier C in [`docs/260705_product_redesign.md`](docs/260705_product_redesign.md)
+  (`--city "New York"`, `--horizon-days 14`, `--feeds donyc,theskint`; needs `LLM_API_KEY`)
+- Personalization acceptance demo (Run A → profile edit → Run B) — same doc
 - Resend live-email gate (7.6 operator setup) for non-dry-run sends
 - Modal deployment with scheduled runs and tracking endpoints (Phase 11)
 

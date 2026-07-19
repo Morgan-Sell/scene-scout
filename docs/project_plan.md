@@ -274,10 +274,12 @@ tests
 **Files:** `docs/260705_product_redesign.md`, `README.md` (pointer), `docs/260629_uat_debug_plan.md`
 (completion note only), Tier B/C examples in README or redesign doc
 **Done when:**
-- Personalization acceptance demo (Run A → clicks → Run B) documented and runnable
-- Tier B/C examples use city + horizon aligned feeds; warn against `--max-extraction` hiding
+- [x] Personalization acceptance demo (Run A → clicks → Run B) documented and runnable
+- [x] Tier B/C examples use city + horizon aligned feeds; warn against `--max-extraction` hiding
   catalog unless testing cost caps
-- Dry-run UAT produces non-zero `normalized_events` with default mainstream metro config
+- [x] Dry-run UAT produces non-zero `normalized_events` with default mainstream metro config
+  (verified: `donyc,theskint`, `--city "New York"`, `--horizon-days 14` → 5 normalized events,
+  Jul 2026)
 
 ---
 
@@ -997,10 +999,12 @@ invoke). Does not send email or call LLM providers.
 | iCal library calendars (NYPL, BPL) | Retired in UAT-D.11 — pending official ICS endpoints | 1B.2 |
 | HTML calendar scrapers | Deferred — per-site, after 1B.1–1B.3 | 1B.4 |
 | Product redesign (mainstream + personalization) | Active — see [`260705_product_redesign.md`](260705_product_redesign.md) | 1C |
-| `UserProfile.home_city` / `horizon_days` | Planned | 1C.1 |
-| `FeedConfig.is_national` + city-scoped load | Planned — metro match **or** always-on national feeds; APIs query `home_city` | 1C.2 |
-| Mainstream metro + national feed catalog | Planned | 1C.3 |
-| Structured ingest bypass (skip extraction LLM) | Planned | 1C.4 |
+| `UserProfile.home_city` / `horizon_days` | Done | 1C.1 |
+| `FeedConfig.is_national` + city-scoped load | Done | 1C.2 |
+| Mainstream metro + national feed catalog | Done — `donyc,theskint` UAT default; Eventbrite inactive | 1C.3 |
+| Structured ingest bypass (skip extraction LLM) | Done | 1C.4 |
+| User horizon drives normalization / pre-enrichment windows | Done | 1C.5 |
+| Personalization UAT + docs sync | Done — Run A/B demo, Tier B/C examples | 1C.6 |
 | Eventbrite search API | Inactive — endpoint 404; org/partner API TBD; use `is_national: true` when enabled | 1C.3 |
 
 ---

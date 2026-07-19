@@ -8,6 +8,10 @@ This document records a **scope and purpose change** for SceneScout. It compleme
 documented in interim UAT feed work ([`260629_uat_debug_plan.md`](260629_uat_debug_plan.md)
 UAT-D.8/D.11). That UAT plan is **complete**; its pipeline fixes remain valid.
 
+**Phase 1C (Jul 2026):** Personalized mainstream discovery — `UserProfile.home_city` /
+`horizon_days`, city-scoped feeds, structured ingest bypass, user horizon windows. See
+[Phase 1C](project_plan.md) for subphase checklist.
+
 ---
 
 ## Why the change
@@ -122,16 +126,147 @@ flowchart LR
 
 ## Personalization acceptance demo
 
-Use this to verify the redesign goal (manual or integration test):
+Use this to verify the redesign goal. Requires `LLM_API_KEY` in `.env`. Full Tier C
+walkthrough also in [`README.md`](../README.md#tiered-uat).
 
-1. **Run A** — cold-start prompt emphasizing live music; note top recommendations
-2. **Simulate clicks** on 2–3 music events (feedback + Chroma)
-3. **Run B** — same city and horizon; expect higher music weighting in top 10
-4. **Negative signal** — "not for me" on a category; expect downward shift next run
+### Prerequisites
 
-Tier B/C UAT should target **non-zero `normalized_events` and `curated_recommendations`**
-with mainstream feeds and user horizon aligned — not `--max-extraction` caps that hide
-most of the catalog.
+```bash
+uv sync --all-extras
+cp .env.example .env   # set LLM_API_KEY
+export UAT_HOME_CITY="New York"
+export UAT_HORIZON_DAYS=14
+```
+
+Optional clean slate (cold-start profile + fresh extraction):
+
+```bash
+rm -f vol-profiles/profile.json
+rm -f vol-cache/cache.db
+```
+
+**Mainstream feed subset** (structured DoNYC + RSS the skint; skips inactive/broken API
+slots):
+
+```bash
+FEEDS=donyc,theskint
+```
+
+Do **not** use `--max-extraction` for this demo — it caps cache-miss rows sent to the
+extraction LLM and can hide catalog gaps. Reserve `--max-extraction N` for Tier B cost
+caps when debugging extraction only (see [Tier B warning](#tier-b--c-uat-examples) below).
+
+### Run A — cold start (live music)
+
+```bash
+uv run python -m scene_scout.cli uat \
+  --prompt "Live music, indie rock, and jazz clubs in NYC. No stand-up comedy." \
+  --dry-run \
+  --city "New York" \
+  --horizon-days 14 \
+  --feeds "$FEEDS"
+```
+
+**Pass criteria:** `output/uat_{run_id}/summary.json` shows `normalized_events` > 0,
+`curated_recommendations` > 0 (when ranking completes), and `top_recommendations` lean
+toward music. DoNYC rows should increment `structured_ingest_bypass_count` on first run
+(cache cold).
+
+Inspect:
+
+```bash
+cat output/uat_*/summary.json | jq '{normalized_events, curated_recommendations, structured_ingest_bypass_count, top_recommendations}'
+```
+
+### Between runs — simulate warm personalization
+
+**Phase 8** (`apply_feedback_signals`) is not wired yet. Until then, use one of:
+
+1. **Profile weight bump (recommended):** After Run A, edit `vol-profiles/profile.json`
+   and raise weights for categories you clicked (e.g. `"Music": 0.95`). The orchestrator
+   loads this file on Run B and reuses `home_city` / `horizon_days` from it.
+2. **Chroma liked events (optional):** If you captured enriched event IDs from logs,
+   call `scene_scout.services.chroma.add_liked_event()` to seed semantic similarity.
+3. **Negative signal (manual):** Add categories to `stated_dislikes` in the profile JSON
+   and re-run; ranking excludes those categories immediately.
+
+### Run B — same city and horizon, updated taste
+
+```bash
+uv run python -m scene_scout.cli uat \
+  --prompt "Same preferences as Run A" \
+  --dry-run \
+  --feeds "$FEEDS"
+```
+
+(`--city` / `--horizon-days` come from the persisted profile when present.)
+
+**Pass criteria:** Music-tagged events rank higher in `top_recommendations` vs Run A after
+the profile weight bump; excluded categories drop out when added to `stated_dislikes`.
+
+### Cold-start contrast (no profile edit)
+
+Delete `vol-profiles/profile.json` between runs and compare two prompts (e.g. music vs
+comedy) with the same `--city`, `--horizon-days`, and `--feeds`. Demonstrates User
+Preference parsing even before the Phase 8 feedback loop.
+
+---
+
+## Tier B / C UAT examples
+
+Align **city**, **horizon**, and **feeds** on every tier. Default mainstream NYC:
+
+| Setting | Value |
+|---|---|
+| `--city` / `UAT_HOME_CITY` | `New York` |
+| `--horizon-days` / `UAT_HORIZON_DAYS` | `14` (or 7–30) |
+| `--feeds` | `donyc,theskint` |
+
+**Tier A — ingest only (~seconds, no LLM):**
+
+```bash
+uv run python -m scene_scout.cli feed-probe --city "New York"
+```
+
+Expect non-zero raw entries from DoNYC + the skint (+ other active NYC feeds if not
+filtered).
+
+**Tier B — pipeline smoke with optional cost cap:**
+
+Use `--stop-after normalize` for a cheap end-to-end check through normalization without
+enrichment LLM cost. Add `--max-extraction N` **only** when testing extraction cost caps —
+it sends at most N cache-miss rows to the extraction LLM and will under-report catalog
+size.
+
+```bash
+uv run python -m scene_scout.cli uat \
+  --prompt "Live music and free NYC events this week" \
+  --dry-run \
+  --city "New York" \
+  --horizon-days 14 \
+  --feeds donyc,theskint \
+  --stop-after normalize
+```
+
+**Tier C — full integration (dry-run, no Resend):**
+
+```bash
+uv run python -m scene_scout.cli uat \
+  --prompt "Live music, comedy, and free NYC events in the next two weeks" \
+  --dry-run \
+  --city "New York" \
+  --horizon-days 14 \
+  --feeds donyc,theskint
+```
+
+**Pass criteria:** `summary.json` → `normalized_events` > 0 with mainstream feeds and user
+horizon aligned. Target `curated_recommendations` > 0 when enrichment and ranking complete.
+
+Verified Jul 2026 (Tier B, `--stop-after normalize`): 25 DoNYC rows → 5 normalized events
+with `--city "New York"`, `--horizon-days 14`, `--feeds donyc,theskint`.
+
+**Tier D:** Same as Tier C without `--dry-run`; requires Resend + `USER_EMAIL` (release
+gate).
 
 ---
 
