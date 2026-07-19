@@ -1,0 +1,76 @@
+{
+  "_embedded": {
+    "events": [
+      {
+        "name": "Sandlot Summer Concert",
+        "url": "https://www.ticketmaster.com/sandlot-summer-concert/event/1234567890ABCD",
+        "info": "Outdoor live music under the lights.",
+        "dates": {
+          "start": {
+            "localDate": "2026-07-18",
+            "localTime": "19:00:00",
+            "dateTime": "2026-07-18T19:00:00Z"
+          }
+        },
+        "_embedded": {
+          "venues": [
+            {
+              "name": "Neighborhood Ball Field",
+              "city": {
+                "name": "New York"
+              }
+            }
+          ]
+        },
+        "classifications": [
+          {
+            "segment": {
+              "name": "Music"
+            },
+            "genre": {
+              "name": "Rock"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Comedy Night at the Cellar",
+        "url": "https://www.ticketmaster.com/comedy-night/event/ABCDEF1234567890",
+        "info": "Stand-up showcase with local comics.",
+        "dates": {
+          "start": {
+            "localDate": "2026-07-19",
+            "localTime": "20:00:00",
+            "dateTime": "2026-07-19T20:00:00Z"
+          }
+        },
+        "_embedded": {
+          "venues": [
+            {
+              "name": "Greenwich Cellar",
+              "city": {
+                "name": "New York"
+              }
+            }
+          ]
+        },
+        "classifications": [
+          {
+            "segment": {
+              "name": "Arts & Theatre"
+            },
+            "genre": {
+              "name": "Comedy"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "page": {
+    "size": 20,
+    "totalElements": 2,
+    "totalPages": 1,
+    "number": 0
+  }
+}

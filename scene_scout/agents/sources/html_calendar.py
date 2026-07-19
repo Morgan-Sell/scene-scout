@@ -29,6 +29,7 @@ from scene_scout.models.feed import (
     RawFeedEntry,
     ScrapeConfig,
 )
+from scene_scout.structured_categories import infer_categories_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -361,6 +362,13 @@ def _map_items_to_entries(
             event_venue = description
             event_city = config.city
 
+        categories: list[str] = []
+        if scrape.structured_ingest:
+            categories = infer_categories_from_text(
+                title=str(title) if title else None,
+                description=str(description) if description else None,
+            )
+
         entries.append(
             RawFeedEntry(
                 feed_id=config.id,
@@ -372,7 +380,7 @@ def _map_items_to_entries(
                 link=link,
                 description=description,
                 published_raw=published_raw,
-                categories=[],
+                categories=categories,
                 event_venue=event_venue,
                 event_city=event_city,
                 fetched_at=fetched_at,

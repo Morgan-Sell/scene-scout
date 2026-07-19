@@ -374,3 +374,19 @@ def test_candidate_from_structured_entry_maps_adapter_fields() -> None:
     assert candidate.source_feed == SANDLOT_FEED
     assert candidate.run_id == TEST_RUN_ID
     assert candidate.extracted_at == EXTRACTED_AT
+
+
+def test_candidate_from_structured_entry_infers_categories_when_missing() -> None:
+    entry = _structured_raw_entry()
+    entry = entry.model_copy(
+        update={"title": "Jazz Night at the Sandlot", "categories": []}
+    )
+    candidate = candidate_from_structured_entry(
+        entry,
+        feed_city="New York",
+        run_id=TEST_RUN_ID,
+        extracted_at=EXTRACTED_AT,
+    )
+
+    assert candidate is not None
+    assert "Jazz" in candidate.categories

@@ -19,6 +19,7 @@ from tests.conftest import TEST_RUN_ID
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "event_api"
 _SEARCH_URL = "https://www.eventbriteapi.com/v3/events/search/"
+_TICKETMASTER_SEARCH_URL = "https://app.ticketmaster.com/discovery/v2/events.json"
 
 
 def _fixture(name: str) -> dict:
@@ -251,3 +252,140 @@ async def test_eventbrite_paginates_when_has_more_items(eventbrite_token):
     assert len(route.calls) == 2
     assert route.calls[0].request.url.params.get("page") == "1"
     assert route.calls[1].request.url.params.get("page") == "2"
+
+
+@pytest.fixture
+def ticketmaster_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide a fake Ticketmaster API key for adapter tests."""
+    monkeypatch.setenv("TICKETMASTER_API_KEY", "test-ticketmaster-key")
+
+
+def _ticketmaster_config(
+    *,
+    city: str = "New York",
+    cursor: str | None = None,
+    is_national: bool = True,
+) -> FeedConfig:
+    return FeedConfig(
+        id="ticketmaster_test",
+        name="Ticketmaster",
+        url="ticketmaster://events/search",
+        city=city,
+        is_national=is_national,
+        source_quality_score=0.85,
+        source_type="api",
+        cursor=cursor,
+    )
+
+
+@respx.mock
+async def test_successful_ticketmaster_search_returns_entries(ticketmaster_key):
+    config = _ticketmaster_config()
+    route = respx.get(_TICKETMASTER_SEARCH_URL).mock(
+        return_value=Response(200, json=_fixture("ticketmaster_search_page1.json"))
+    )
+
+    entries, report = await EventApiSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(horizon_days=14),
+    )
+
+    assert report.status == FeedStatus.OK
+    assert report.succeeded is True
+    assert report.entries_fetched == 2
+    assert len(entries) == 2
+    assert route.called
+    request = route.calls.last.request
+    assert request.url.params.get("apikey") == "test-ticketmaster-key"
+    assert request.url.params.get("city") == "New York"
+    assert request.url.params.get("stateCode") == "NY"
+
+
+@respx.mock
+async def test_ticketmaster_fields_mapped_to_raw_feed_entry(ticketmaster_key):
+    config = _ticketmaster_config()
+    respx.get(_TICKETMASTER_SEARCH_URL).mock(
+        return_value=Response(200, json=_fixture("ticketmaster_search_page1.json"))
+    )
+
+    entries, _ = await EventApiSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(horizon_days=14),
+    )
+    first = entries[0]
+
+    assert first.title == "Sandlot Summer Concert"
+    assert (
+        first.link
+        == "https://www.ticketmaster.com/sandlot-summer-concert/event/1234567890ABCD"
+    )
+    assert "Outdoor live music" in (first.description or "")
+    assert first.published_raw == "2026-07-18T19:00:00Z"
+    assert "Music" in first.categories
+    assert first.source_type == "api"
+    assert first.event_venue == "Neighborhood Ball Field"
+    assert first.event_city == "New York"
+
+
+@respx.mock
+async def test_missing_ticketmaster_key_returns_unreachable(monkeypatch):
+    monkeypatch.delenv("TICKETMASTER_API_KEY", raising=False)
+    config = _ticketmaster_config()
+
+    entries, report = await EventApiSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(),
+    )
+
+    assert entries == []
+    assert report.status == FeedStatus.UNREACHABLE
+    assert "TICKETMASTER_API_KEY" in report.error_message
+
+
+@respx.mock
+async def test_ticketmaster_national_feed_uses_home_city_from_cache_hooks(
+    ticketmaster_key,
+):
+    config = _ticketmaster_config(city="New York", is_national=True)
+    route = respx.get(_TICKETMASTER_SEARCH_URL).mock(
+        return_value=Response(200, json=_fixture("ticketmaster_search_page1.json"))
+    )
+
+    await EventApiSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(home_city="Los Angeles", horizon_days=14),
+    )
+
+    params = dict(route.calls.last.request.url.params)
+    assert params["city"] == "Los Angeles"
+    assert params["stateCode"] == "CA"
+
+
+@respx.mock
+async def test_ticketmaster_paginates_when_more_pages_exist(ticketmaster_key):
+    config = _ticketmaster_config()
+    page1 = _fixture("ticketmaster_search_page1.json")
+    page1["page"]["totalPages"] = 2
+
+    route = respx.get(_TICKETMASTER_SEARCH_URL).mock(
+        side_effect=[
+            Response(200, json=page1),
+            Response(200, json=_fixture("ticketmaster_search_page2.json")),
+        ]
+    )
+
+    entries, report = await EventApiSourceAdapter().fetch(
+        config,
+        TEST_RUN_ID,
+        cache_hooks=CacheHooks(horizon_days=14),
+    )
+
+    assert report.succeeded is True
+    assert len(entries) == 3
+    assert len(route.calls) == 2
+    assert route.calls[0].request.url.params.get("page") == "0"
+    assert route.calls[1].request.url.params.get("page") == "1"

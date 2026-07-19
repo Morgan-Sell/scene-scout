@@ -281,6 +281,21 @@ tests
   (verified: `donyc,theskint`, `--city "New York"`, `--horizon-days 14` → 5 normalized events,
   Jul 2026)
 
+### 1C.7 — Mainstream catalog depth
+**Files:** `scene_scout/agents/sources/event_api.py`, `scene_scout/structured_categories.py`,
+`scene_scout/models/event.py`, `scene_scout/agents/sources/html_calendar.py`,
+`scene_scout/config.py`, `config/feeds.yaml`, `.env.example`,
+`tests/agents/test_event_api_source.py`, `tests/test_structured_categories.py`,
+`tests/test_event.py`, `docs/260705_product_redesign.md`
+**Done when:**
+- Ticketmaster Discovery API adapter fetches geo-scoped events using `TICKETMASTER_API_KEY`;
+  `ticketmaster` feed slot in `feeds.yaml` is `active: true` with `is_national: true`
+- Structured scrape/API rows without categories get keyword inference (DoNYC path included)
+- `feed-probe --city "New York"` returns entries from Ticketmaster when API key is configured
+- UAT with `--feeds donyc,theskint,ticketmaster` yields materially more normalized/enriched
+  events than `donyc,theskint` alone (Ticketmaster adds bypass-eligible API rows with categories)
+- Unit tests mock Ticketmaster HTTP; CI passes without live API keys
+
 ---
 
 ## Phase 2 — Project Infrastructure
@@ -1005,6 +1020,7 @@ invoke). Does not send email or call LLM providers.
 | Structured ingest bypass (skip extraction LLM) | Done | 1C.4 |
 | User horizon drives normalization / pre-enrichment windows | Done | 1C.5 |
 | Personalization UAT + docs sync | Done — Run A/B demo, Tier B/C examples | 1C.6 |
+| Mainstream catalog depth (Ticketmaster + structured categories) | Done | 1C.7 |
 | Eventbrite search API | Inactive — endpoint 404; org/partner API TBD; use `is_national: true` when enabled | 1C.3 |
 
 ---

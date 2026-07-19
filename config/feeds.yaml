@@ -7,7 +7,7 @@
 # is_national: true — always included for every user; national API adapters query
 #   using profile.home_city (not feed.city). Use for Ticketmaster, Eventbrite, etc.
 # Only working event sources belong here — remove entries that cannot ingest.
-# Tier B/C UAT default (mainstream NYC): donyc,theskint — see docs/260705_product_redesign.md
+# Tier B/C UAT default (mainstream NYC): donyc,theskint,ticketmaster — see docs/260705_product_redesign.md
 # Always pass --city and --horizon-days on UAT to match UserProfile (or set UAT_* env vars).
 
 feeds:
@@ -56,6 +56,18 @@ feeds:
     notes: >
       NYC-area events via Eventbrite search API. Inactive: public search endpoint returns
       404 until a supported API path is configured. Requires EVENTBRITE_API_TOKEN.
+
+  - id: ticketmaster
+    name: Ticketmaster
+    url: ticketmaster://events/search
+    city: New York
+    is_national: true
+    source_quality_score: 0.85
+    source_type: api
+    active: true
+    notes: >
+      Mainstream ticketed events via Ticketmaster Discovery API. Geo-scoped to
+      profile.home_city at fetch time. Requires TICKETMASTER_API_KEY.
 
   - id: brooklyn_rail
     name: Brooklyn Rail Events
