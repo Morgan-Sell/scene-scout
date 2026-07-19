@@ -20,11 +20,11 @@ from scene_scout.agents.sources.ical import (
 )
 from scene_scout.agents.sources.protocol import CacheHooks
 from scene_scout.models.feed import FeedConfig, FeedStatus
-from scene_scout.normalization_config import NORMALIZATION_WINDOW_DAYS
 from tests.conftest import TEST_RUN_ID
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "ical"
 _ICAL_REFERENCE_NOW = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
+_ICAL_TEST_HORIZON_DAYS = 7
 
 
 def _fixture(name: str) -> str:
@@ -247,7 +247,7 @@ async def test_ical_prefilter_empty_after_filter_returns_empty_status():
     entries, report = await IcalSourceAdapter().fetch(
         config,
         TEST_RUN_ID,
-        cache_hooks=CacheHooks(),
+        cache_hooks=CacheHooks(horizon_days=_ICAL_TEST_HORIZON_DAYS),
     )
 
     assert entries == []
@@ -255,7 +255,7 @@ async def test_ical_prefilter_empty_after_filter_returns_empty_status():
     assert report.entries_fetched == 0
     assert (
         report.error_message
-        == f"No VEVENT entries within {NORMALIZATION_WINDOW_DAYS}-day window"
+        == f"No VEVENT entries within {_ICAL_TEST_HORIZON_DAYS}-day window"
     )
 
 
@@ -282,7 +282,7 @@ def test_filter_vevents_by_window_unit() -> None:
     kept = _filter_vevents_by_window(
         vevents,
         now=_ICAL_REFERENCE_NOW,
-        window_days=NORMALIZATION_WINDOW_DAYS,
+        window_days=_ICAL_TEST_HORIZON_DAYS,
         feed_id="ical_test",
     )
 

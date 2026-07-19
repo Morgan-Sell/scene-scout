@@ -1,6 +1,10 @@
 """Normalization policy constants for SceneScout."""
 
-NORMALIZATION_WINDOW_DAYS = 7
+from scene_scout.models.user import DEFAULT_HORIZON_DAYS
+
+# Fallback when ``horizon_days`` is not supplied (e.g. unit tests, feed-probe).
+# Pipeline runs pass ``UserProfile.horizon_days`` from the orchestrator instead.
+DEFAULT_PIPELINE_HORIZON_DAYS = DEFAULT_HORIZON_DAYS
 MAX_RECURRING_OCCURRENCES = 5
 
 # Aggregated discard logging (UAT-D.6).

@@ -8,7 +8,7 @@ validation, ID generation, normalization window filtering, and source provenance
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,6 +20,7 @@ from tests.conftest import TEST_RUN_ID
 
 SANDLOT_FEED = "sandlot-pickup-league"
 REFERENCE_NOW = datetime(2025, 6, 6, 12, 0, tzinfo=timezone.utc)
+TEST_HORIZON_DAYS = 7
 EVENT_DATE = "Sat, Jun 7 2025"
 EVENT_TIME = "6:00 PM"
 EVENT_VENUE = "The Sandlot."
@@ -211,6 +212,7 @@ def test_normalize_weekday_series_only_emits_in_window_tuesdays() -> None:
         run_id=TEST_RUN_ID,
         feed_quality_scores={SANDLOT_FEED: 0.75},
         now=datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc),
+        horizon_days=TEST_HORIZON_DAYS,
     )
 
     assert len(result.events) == 2
@@ -315,7 +317,61 @@ def test_normalize_candidate_populates_source_fields_and_stable_id() -> None:
     assert event.normalized_at == REFERENCE_NOW
 
 
-def test_normalize_candidate_discards_events_outside_seven_day_window() -> None:
+def test_is_within_normalization_window_respects_horizon_boundary() -> None:
+    at_horizon = REFERENCE_NOW + timedelta(days=TEST_HORIZON_DAYS)
+    beyond_horizon = REFERENCE_NOW + timedelta(days=TEST_HORIZON_DAYS + 1)
+
+    assert event_normalization.is_within_normalization_window(
+        at_horizon,
+        now=REFERENCE_NOW,
+        window_days=TEST_HORIZON_DAYS,
+    )
+    assert not event_normalization.is_within_normalization_window(
+        beyond_horizon,
+        now=REFERENCE_NOW,
+        window_days=TEST_HORIZON_DAYS,
+    )
+
+
+def test_normalize_candidate_keeps_event_at_horizon_boundary() -> None:
+    at_horizon = REFERENCE_NOW + timedelta(days=TEST_HORIZON_DAYS)
+    candidate = _candidate(
+        date=at_horizon.strftime("%a, %b %d %Y"),
+        time=at_horizon.strftime("%I:%M %p"),
+    )
+
+    result = event_normalization.normalize_candidate(
+        candidate,
+        run_id=TEST_RUN_ID,
+        feed_quality_scores={SANDLOT_FEED: 0.75},
+        now=REFERENCE_NOW,
+        horizon_days=TEST_HORIZON_DAYS,
+    )
+
+    assert result.events
+    assert result.events[0].start_datetime == at_horizon
+
+
+def test_normalize_candidate_discards_event_beyond_horizon() -> None:
+    beyond_horizon = REFERENCE_NOW + timedelta(days=TEST_HORIZON_DAYS + 1)
+    candidate = _candidate(
+        date=beyond_horizon.strftime("%a, %b %d %Y"),
+        time=beyond_horizon.strftime("%I:%M %p"),
+    )
+
+    result = event_normalization.normalize_candidate(
+        candidate,
+        run_id=TEST_RUN_ID,
+        feed_quality_scores={SANDLOT_FEED: 0.75},
+        now=REFERENCE_NOW,
+        horizon_days=TEST_HORIZON_DAYS,
+    )
+
+    assert result.event is None
+    assert result.discard_reason == event_normalization.DISCARD_OUTSIDE_WINDOW
+
+
+def test_normalize_candidate_discards_events_outside_horizon_window() -> None:
     candidate = _candidate(date="Sat, Jun 20 2025", time="6:00 PM")
 
     result = event_normalization.normalize_candidate(
@@ -323,6 +379,7 @@ def test_normalize_candidate_discards_events_outside_seven_day_window() -> None:
         run_id=TEST_RUN_ID,
         feed_quality_scores={SANDLOT_FEED: 0.75},
         now=REFERENCE_NOW,
+        horizon_days=TEST_HORIZON_DAYS,
     )
 
     assert result.event is None
@@ -402,6 +459,7 @@ async def test_run_returns_normalized_events_within_window() -> None:
         results = await event_normalization.run(
             [in_window, out_of_window],
             run_id=TEST_RUN_ID,
+            horizon_days=TEST_HORIZON_DAYS,
         )
 
     assert len(results) == 1

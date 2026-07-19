@@ -32,11 +32,11 @@ from scene_scout.models.event import (
 )
 from scene_scout.normalization_config import (
     CATEGORY_ALIASES,
+    DEFAULT_PIPELINE_HORIZON_DAYS,
     EVENT_CATEGORIES,
     MAX_RECURRING_OCCURRENCES,
     NORMALIZATION_DISCARD_JSONL_SAMPLE_SIZE,
     NORMALIZATION_DISCARD_TERMINAL_SAMPLE_SIZE,
-    NORMALIZATION_WINDOW_DAYS,
 )
 
 _TRAILING_PUNCTUATION = re.compile(r"[.,;:!?]+$")
@@ -476,7 +476,7 @@ def event_range_overlaps_window(
     end_datetime: datetime,
     *,
     now: datetime | None = None,
-    window_days: int = NORMALIZATION_WINDOW_DAYS,
+    window_days: int = DEFAULT_PIPELINE_HORIZON_DAYS,
 ) -> bool:
     """Return True when ``[start, end]`` intersects the normalization window."""
     current = (now or _utc_now()).astimezone(timezone.utc)
@@ -509,7 +509,7 @@ def is_within_normalization_window(
     start_datetime: datetime,
     *,
     now: datetime | None = None,
-    window_days: int = NORMALIZATION_WINDOW_DAYS,
+    window_days: int = DEFAULT_PIPELINE_HORIZON_DAYS,
 ) -> bool:
     """Return True when ``start_datetime`` falls within the next ``window_days``."""
     current = (now or _utc_now()).astimezone(timezone.utc)
@@ -614,6 +614,7 @@ def normalize_candidate(
     run_id: str,
     feed_quality_scores: dict[str, float],
     now: datetime | None = None,
+    horizon_days: int = DEFAULT_PIPELINE_HORIZON_DAYS,
 ) -> NormalizationResult:
     """Normalize a single candidate or return a discard reason when filtered."""
     reference = (now or _utc_now()).astimezone(timezone.utc)
@@ -655,6 +656,7 @@ def normalize_candidate(
             festival.start,
             festival.end,
             now=reference,
+            window_days=horizon_days,
         ):
             continue
         id_date = candidate.date or festival.start.strftime("%Y-%m-%d")
@@ -675,7 +677,11 @@ def normalize_candidate(
     for occurrence in schedule.occurrences:
         if occurrence.value is None:
             continue
-        if is_within_normalization_window(occurrence.value, now=reference):
+        if is_within_normalization_window(
+            occurrence.value,
+            now=reference,
+            window_days=horizon_days,
+        ):
             in_window_occurrences.append(occurrence)
 
     for occurrence in in_window_occurrences[:MAX_RECURRING_OCCURRENCES]:
@@ -699,7 +705,11 @@ def normalize_candidate(
     for single in schedule.singles:
         if single.value is None:
             continue
-        if not is_within_normalization_window(single.value, now=reference):
+        if not is_within_normalization_window(
+            single.value,
+            now=reference,
+            window_days=horizon_days,
+        ):
             continue
         id_date = candidate.date or single.value.strftime("%Y-%m-%d")
         event = _build_normalized_event(
@@ -728,7 +738,12 @@ def normalize_candidate(
     return NormalizationResult(tuple(events), time_dropped=time_dropped)
 
 
-async def run(candidates: list[EventCandidate], run_id: str) -> list[NormalizedEvent]:
+async def run(
+    candidates: list[EventCandidate],
+    run_id: str,
+    *,
+    horizon_days: int = DEFAULT_PIPELINE_HORIZON_DAYS,
+) -> list[NormalizedEvent]:
     """Normalize event candidates into ``NormalizedEvent`` records.
 
     Parameters
@@ -737,11 +752,14 @@ async def run(candidates: list[EventCandidate], run_id: str) -> list[NormalizedE
         Extraction agent output.
     run_id : str
         Pipeline run identifier for logging and provenance.
+    horizon_days : int
+        User search horizon; events outside ``[now, now + horizon_days]`` are
+        discarded.
 
     Returns
     -------
     list[NormalizedEvent]
-        Valid normalized events within the coming 7 days.
+        Valid normalized events within the user horizon.
     """
     logger = get_logger("event_normalization", run_id=run_id)
     feed_quality_scores = _feed_quality_scores()
@@ -756,6 +774,7 @@ async def run(candidates: list[EventCandidate], run_id: str) -> list[NormalizedE
                 run_id=run_id,
                 feed_quality_scores=feed_quality_scores,
                 now=reference,
+                horizon_days=horizon_days,
             )
         except Exception as exc:
             discards.record(

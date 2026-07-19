@@ -56,6 +56,7 @@ async def run(
     store_feed_etag=None,
     *,
     home_city: str | None = None,
+    horizon_days: int | None = None,
 ) -> tuple[list[RawFeedEntry], list[FeedHealthReport]]:
     """Fetch all configured sources concurrently.
 
@@ -73,6 +74,8 @@ async def run(
         Pipeline run identifier, attached to every RawFeedEntry produced.
     home_city : str, optional
         User metro for national API adapters (``FeedConfig.is_national``).
+    horizon_days : int, optional
+        User search horizon for time-window filtering (e.g. iCal pre-filter).
     get_feed_etag : callable, optional
         Cache lookup function: (feed_id) -> (etag, last_modified) | None.
         If None, conditional request headers are not sent.
@@ -96,6 +99,7 @@ async def run(
             get_feed_etag=get_feed_etag,
             store_feed_etag=store_feed_etag,
             home_city=home_city,
+            horizon_days=horizon_days,
         )
         tasks = [_fetch_source(config, run_id, cache_hooks) for config in feed_configs]
         results = await asyncio.gather(*tasks)
