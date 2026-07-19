@@ -20,11 +20,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from scene_scout.agents import user_preference
 from scene_scout.agents.user_preference import UserProfileNotFoundError
+from scene_scout.db import run_migrations
 from scene_scout.models.user import (
     HORIZON_DAYS_MAX,
     HORIZON_DAYS_MIN,
 )
 from scene_scout.services.llm import LLMInfrastructureError, LLMValidationError
+from scene_scout.web.endpoints import router as tracking_router
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _BASIC_REALM = "SceneScout"
@@ -128,7 +130,7 @@ async def disable_frontend_cache(request: Request, call_next):
 
 async def require_basic_auth(request: Request, call_next):
     """Enforce HTTP Basic auth when ``WEB_PASSWORD`` is set."""
-    if request.url.path == "/health":
+    if request.url.path in {"/health", "/track", "/feedback"}:
         return await call_next(request)
     if _web_password() is None:
         return await call_next(request)
@@ -144,6 +146,10 @@ def create_app() -> FastAPI:
     application = FastAPI(title="SceneScout", version="0.1.0")
     application.middleware("http")(disable_frontend_cache)
     application.middleware("http")(require_basic_auth)
+
+    @application.on_event("startup")
+    def _run_database_migrations() -> None:
+        run_migrations()
 
     @application.get("/health")
     async def health() -> dict[str, str]:
@@ -202,6 +208,8 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_404_NOT_FOUND,
                 content={"error": "No profile saved yet."},
             )
+
+    application.include_router(tracking_router)
 
     application.mount(
         "/",
