@@ -21,7 +21,7 @@ from scene_scout.models.feed import (
     FeedStatus,
     RawFeedEntry,
 )
-from scene_scout.normalization_config import NORMALIZATION_WINDOW_DAYS
+from scene_scout.normalization_config import DEFAULT_PIPELINE_HORIZON_DAYS
 
 _FETCH_TIMEOUT_SECONDS = 10
 _MIN_EXPECTED_ENTRIES = 1
@@ -49,6 +49,7 @@ class IcalSourceAdapter:
                 config,
                 cache_hooks.client,
                 run_id,
+                cache_hooks,
             )
 
         async with httpx.AsyncClient(
@@ -56,13 +57,14 @@ class IcalSourceAdapter:
             follow_redirects=True,
             headers={"User-Agent": _USER_AGENT},
         ) as client:
-            return await _fetch_ical(config, client, run_id)
+            return await _fetch_ical(config, client, run_id, cache_hooks)
 
 
 async def _fetch_ical(
     config: FeedConfig,
     client: httpx.AsyncClient,
     run_id: str,
+    cache_hooks: CacheHooks,
 ) -> tuple[list[RawFeedEntry], FeedHealthReport]:
     """Fetch and parse a single ICS calendar."""
     fetched_at = _utc_now()
@@ -122,10 +124,11 @@ async def _fetch_ical(
             error_message="Calendar returned no VEVENT entries",
         )
 
+    horizon_days = cache_hooks.horizon_days or DEFAULT_PIPELINE_HORIZON_DAYS
     kept_vevents = _filter_vevents_by_window(
         vevents,
         now=fetched_at,
-        window_days=NORMALIZATION_WINDOW_DAYS,
+        window_days=horizon_days,
         feed_id=config.id,
     )
 
@@ -135,9 +138,7 @@ async def _fetch_ical(
             FeedStatus.EMPTY,
             fetched_at,
             entries_fetched=0,
-            error_message=(
-                f"No VEVENT entries within {NORMALIZATION_WINDOW_DAYS}-day window"
-            ),
+            error_message=(f"No VEVENT entries within {horizon_days}-day window"),
         )
 
     entries = [
@@ -208,7 +209,7 @@ def _vevent_intersects_window(
     component: Component,
     *,
     now: datetime,
-    window_days: int = NORMALIZATION_WINDOW_DAYS,
+    window_days: int = DEFAULT_PIPELINE_HORIZON_DAYS,
 ) -> bool:
     """Return True when a VEVENT overlaps the coming ``window_days``."""
     start = _parse_ical_datetime(component.get("dtstart"))

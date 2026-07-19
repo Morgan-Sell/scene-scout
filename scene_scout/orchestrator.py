@@ -58,10 +58,7 @@ from scene_scout.orchestrator_config import (
     resolve_uat_horizon_days,
     select_feed_configs,
 )
-from scene_scout.pre_enrichment_filter_config import (
-    PRE_ENRICHMENT_COMING_WEEK_DAYS,
-    PRE_ENRICHMENT_HARD_EXCLUDE_DAYS,
-)
+from scene_scout.pre_enrichment_filter_config import PRE_ENRICHMENT_HARD_EXCLUDE_DAYS
 from scene_scout.services import history as history_service
 from scene_scout.services.batch import BatchRequest, BatchResults, get_batch_strategy
 from scene_scout.services.cache import CacheService
@@ -502,6 +499,7 @@ def _pre_enrichment_discard_reason(
     *,
     now: datetime,
     exclude_event_ids: set[str],
+    horizon_days: int,
 ) -> str | None:
     """
     Return a discard reason or ``None`` when the event
@@ -514,7 +512,7 @@ def _pre_enrichment_discard_reason(
     if not is_within_normalization_window(
         event.start_datetime,
         now=now,
-        window_days=PRE_ENRICHMENT_COMING_WEEK_DAYS,
+        window_days=horizon_days,
     ):
         return DISCARD_OUTSIDE_WEEK
     return None
@@ -524,12 +522,13 @@ def apply_pre_enrichment_filter(
     events: list[NormalizedEvent],
     run_id: str,
     *,
+    horizon_days: int,
     now: datetime | None = None,
     exclude_event_ids: set[str] | None = None,
 ) -> PreEnrichmentFilterResult:
     """Filter events before enrichment.
 
-    Discards records that are low-information, outside the coming week, or within
+    Discards records that are low-information, outside the user horizon, or within
     the hard recommendation exclude window.
 
     Parameters
@@ -538,6 +537,8 @@ def apply_pre_enrichment_filter(
         Description-quality-scored events.
     run_id : str
         Pipeline run identifier for logging.
+    horizon_days : int
+        User search horizon; must match normalization (from ``UserProfile``).
     now : datetime, optional
         Reference time for date-window checks.
     exclude_event_ids : set[str], optional
@@ -568,6 +569,7 @@ def apply_pre_enrichment_filter(
             event,
             now=reference,
             exclude_event_ids=excluded_ids,
+            horizon_days=horizon_days,
         )
         if reason is None:
             passing.append(event)
@@ -1028,6 +1030,7 @@ class Orchestrator:
             get_feed_etag=cache.get_feed_etag,
             store_feed_etag=cache.set_feed_etag,
             home_city=profile.home_city,
+            horizon_days=profile.horizon_days,
         )
         result.raw_entries = len(entries)
         result.feeds_fetched = len(feed_reports)
@@ -1095,7 +1098,11 @@ class Orchestrator:
             result.last_completed_stage = "extract"
             return result
 
-        newly_normalized = await event_normalization.run(candidates, run_id)
+        newly_normalized = await event_normalization.run(
+            candidates,
+            run_id,
+            horizon_days=profile.horizon_days,
+        )
         if newly_normalized:
             _store_seen_entries_after_normalization(
                 cache,
@@ -1118,7 +1125,11 @@ class Orchestrator:
         quality_scored = await description_quality.run(deduplicated, run_id)
         result.after_description_quality = len(quality_scored)
 
-        filter_result = apply_pre_enrichment_filter(quality_scored, run_id)
+        filter_result = apply_pre_enrichment_filter(
+            quality_scored,
+            run_id,
+            horizon_days=profile.horizon_days,
+        )
         filtered = filter_result.events
         result.after_pre_enrichment_filter = len(filtered)
         result.pre_enrichment_discard_low_information = filter_result.discards[

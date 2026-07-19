@@ -69,7 +69,11 @@ class EventApiSourceAdapter:
                 follow_redirects=True,
                 headers={"User-Agent": _USER_AGENT},
             ) as client:
-                hooks = CacheHooks(client=client, home_city=cache_hooks.home_city)
+                hooks = CacheHooks(
+                    client=client,
+                    home_city=cache_hooks.home_city,
+                    horizon_days=cache_hooks.horizon_days,
+                )
                 return await _fetch_eventbrite(config, client, run_id, hooks)
 
         return _unsupported_platform(config, platform)

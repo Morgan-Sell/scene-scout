@@ -21,6 +21,7 @@ from tests.conftest import TEST_RUN_ID
 
 SANDLOT_FEED = "sandlot-pickup-league"
 REFERENCE_NOW = datetime(2025, 6, 6, 12, 0, tzinfo=timezone.utc)
+TEST_HORIZON_DAYS = 7
 EVENT_DATE = "Sat, Jun 7 2025"
 EVENT_VENUE = "The Sandlot"
 EVENT_TITLE = "The Great Bambino Night"
@@ -55,6 +56,7 @@ def test_apply_pre_enrichment_filter_passes_valid_event() -> None:
     result = apply_pre_enrichment_filter(
         [_event()],
         TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
         now=REFERENCE_NOW,
         exclude_event_ids=set(),
     )
@@ -67,6 +69,7 @@ def test_apply_pre_enrichment_filter_discards_low_information() -> None:
     result = apply_pre_enrichment_filter(
         [_event(low_information=True, description_quality_score=0.1)],
         TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
         now=REFERENCE_NOW,
         exclude_event_ids=set(),
     )
@@ -84,6 +87,7 @@ def test_apply_pre_enrichment_filter_discards_outside_coming_week() -> None:
     result = apply_pre_enrichment_filter(
         [far_future],
         TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
         now=REFERENCE_NOW,
         exclude_event_ids=set(),
     )
@@ -101,6 +105,7 @@ def test_apply_pre_enrichment_filter_discards_past_events() -> None:
     result = apply_pre_enrichment_filter(
         [past_event],
         TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
         now=REFERENCE_NOW,
         exclude_event_ids=set(),
     )
@@ -113,6 +118,7 @@ def test_apply_pre_enrichment_filter_discards_exclude_window_event_ids() -> None
     result = apply_pre_enrichment_filter(
         [_event()],
         TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
         now=REFERENCE_NOW,
         exclude_event_ids={EVENT_ID},
     )
@@ -127,6 +133,7 @@ def test_apply_pre_enrichment_filter_low_information_takes_priority_over_exclude
     result = apply_pre_enrichment_filter(
         [_event(low_information=True, description_quality_score=0.1)],
         TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
         now=REFERENCE_NOW,
         exclude_event_ids={EVENT_ID},
     )
@@ -182,6 +189,7 @@ def test_load_hard_exclude_event_ids_from_history_db(
             ),
         ],
         TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
         now=REFERENCE_NOW,
     )
 
@@ -194,6 +202,7 @@ def test_apply_pre_enrichment_filter_logs_discards(logs_dir) -> None:
     apply_pre_enrichment_filter(
         [_event(low_information=True, description_quality_score=0.1)],
         TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
         now=REFERENCE_NOW,
         exclude_event_ids=set(),
     )
@@ -216,3 +225,47 @@ def test_apply_pre_enrichment_filter_logs_discards(logs_dir) -> None:
         if entry["message"] == "Pre-enrichment filter complete"
     )
     assert complete_entry["data"]["discards"][DISCARD_LOW_INFORMATION] == 1
+
+
+def test_apply_pre_enrichment_filter_keeps_event_at_horizon_boundary() -> None:
+    at_horizon = _event(
+        start_datetime=REFERENCE_NOW + timedelta(days=TEST_HORIZON_DAYS),
+        id=compute_normalized_event_id(
+            EVENT_TITLE,
+            f"horizon-{TEST_HORIZON_DAYS}",
+            EVENT_VENUE,
+        ),
+    )
+
+    result = apply_pre_enrichment_filter(
+        [at_horizon],
+        TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
+        now=REFERENCE_NOW,
+        exclude_event_ids=set(),
+    )
+
+    assert len(result.events) == 1
+    assert result.discards[DISCARD_OUTSIDE_WEEK] == 0
+
+
+def test_apply_pre_enrichment_filter_discards_event_beyond_horizon() -> None:
+    beyond_horizon = _event(
+        start_datetime=REFERENCE_NOW + timedelta(days=TEST_HORIZON_DAYS + 1),
+        id=compute_normalized_event_id(
+            EVENT_TITLE,
+            f"beyond-{TEST_HORIZON_DAYS + 1}",
+            EVENT_VENUE,
+        ),
+    )
+
+    result = apply_pre_enrichment_filter(
+        [beyond_horizon],
+        TEST_RUN_ID,
+        horizon_days=TEST_HORIZON_DAYS,
+        now=REFERENCE_NOW,
+        exclude_event_ids=set(),
+    )
+
+    assert result.events == []
+    assert result.discards[DISCARD_OUTSIDE_WEEK] == 1
