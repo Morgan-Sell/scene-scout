@@ -33,6 +33,7 @@ from scene_scout.orchestrator import (
     PipelineState,
     PreEnrichmentFilterResult,
     _batch_custom_id,
+    _batch_custom_id_map,
     _batch_results_for_agent,
     _cap_extraction_entries,
     _partition_entries_by_seen_cache,
@@ -902,25 +903,35 @@ async def test_orchestrator_persists_state_during_run(
 
 
 def test_batch_custom_id_and_split_results() -> None:
-    custom_id = _batch_custom_id("vibe_classifier", "sandlot-game-1993")
+    _batch_custom_id_map.clear()
+    event_id = "sandlot-game-1993"
+    long_event_id = "b" * 64
+    vibe_custom_id = _batch_custom_id("vibe_classifier", event_id)
+    talent_custom_id = _batch_custom_id("talent_scout", event_id)
+    long_custom_id = _batch_custom_id("vibe_classifier", long_event_id)
+
+    assert len(vibe_custom_id) <= 64
+    assert len(talent_custom_id) <= 64
+    assert len(long_custom_id) == 64
+    assert vibe_custom_id != talent_custom_id
+
     batch_results = BatchResults(
         batch_id="batch-1",
         status="completed",
         results=[
             BatchResultItem(
-                custom_id="talent_scout:sandlot-game-1993",
+                custom_id=talent_custom_id,
                 content='{"performers": []}',
                 success=True,
             ),
             BatchResultItem(
-                custom_id="vibe_classifier:sandlot-game-1993",
+                custom_id=vibe_custom_id,
                 content='{"vibe_tags": ["outdoor", "social"]}',
                 success=True,
             ),
         ],
     )
 
-    assert custom_id == "vibe_classifier:sandlot-game-1993"
     vibe_only = _batch_results_for_agent(batch_results, "vibe_classifier")
 
     assert len(vibe_only.results) == 1

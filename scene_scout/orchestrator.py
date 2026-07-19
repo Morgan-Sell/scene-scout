@@ -598,9 +598,20 @@ def apply_pre_enrichment_filter(
     return PreEnrichmentFilterResult(events=passing, discards=discards)
 
 
+# Maps Anthropic batch custom_id (≤64 chars) back to (agent_name, event_id).
+_batch_custom_id_map: dict[str, tuple[str, str]] = {}
+
+
 def _batch_custom_id(agent_name: str, event_id: str) -> str:
-    """Return a unique batch ``custom_id`` for one agent and event."""
-    return f"{agent_name}:{event_id}"
+    """Return a unique batch ``custom_id`` for one agent and event.
+
+    Anthropic Message Batches require ``custom_id`` ≤64 characters. Event IDs are
+    64-char SHA-256 digests, so ``agent:event_id`` exceeds the limit; use a
+    deterministic hash and register the reverse mapping for result routing.
+    """
+    custom_id = hashlib.sha256(f"{agent_name}:{event_id}".encode()).hexdigest()[:64]
+    _batch_custom_id_map[custom_id] = (agent_name, event_id)
+    return custom_id
 
 
 def _batch_results_for_agent(
@@ -608,12 +619,12 @@ def _batch_results_for_agent(
     agent_name: str,
 ) -> BatchResults:
     """Extract one agent's batch items and restore bare event IDs."""
-    prefix = f"{agent_name}:"
-    items = [
-        item.model_copy(update={"custom_id": item.custom_id.removeprefix(prefix)})
-        for item in batch_results.results
-        if item.custom_id.startswith(prefix)
-    ]
+    items = []
+    for item in batch_results.results:
+        mapped = _batch_custom_id_map.get(item.custom_id)
+        if mapped is None or mapped[0] != agent_name:
+            continue
+        items.append(item.model_copy(update={"custom_id": mapped[1]}))
     return BatchResults(
         batch_id=batch_results.batch_id,
         status=batch_results.status,
@@ -978,6 +989,7 @@ class Orchestrator:
             ``PipelineResult`` for failure artifact writes.
         """
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        _batch_custom_id_map.clear()
         logger = get_logger("orchestrator", run_id=run_id)
         result = PipelineResult(run_id=run_id, user_prompt=prompt)
         state = PipelineState(run_id=run_id)
