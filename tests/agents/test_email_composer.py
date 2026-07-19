@@ -330,6 +330,96 @@ def test_render_html_email_rejects_mismatched_description_count() -> None:
         )
 
 
+def test_align_event_descriptions_pads_with_fallbacks() -> None:
+    recommendations = [_rec(rank=1), _rec(rank=2, event=_event(title="Second Show"))]
+
+    aligned, fallback_count = email_composer.align_event_descriptions(
+        recommendations,
+        [],
+    )
+
+    assert len(aligned) == 2
+    assert fallback_count == 2
+    assert aligned[0]
+    assert aligned[1]
+
+
+def test_fallback_event_description_prefers_event_description() -> None:
+    recommendation = _rec(
+        event=_event(description="Doors at 8. Live brass ensemble."),
+        explanation="Strong jazz fit for your profile.",
+    )
+
+    assert (
+        email_composer.fallback_event_description(recommendation)
+        == "Doors at 8. Live brass ensemble."
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_uses_fallback_descriptions_when_llm_returns_empty_list(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DRY_RUN", "true")
+    preview = tmp_path / "uat_run" / "email_preview.html"
+    monkeypatch.setattr(
+        email_composer,
+        "email_preview_path",
+        lambda run_id: preview,
+    )
+    llm_output = EmailComposerLLMOutput(
+        intro_paragraph="A strong week for jazz in Silver Lake.",
+        event_descriptions=[],
+    )
+
+    with patch(
+        "scene_scout.agents.email_composer.complete",
+        AsyncMock(return_value=llm_output),
+    ):
+        result = await email_composer.run(
+            [_rec()],
+            _profile(),
+            TEST_RUN_ID,
+            curator_config=load_curator_config(),
+            now=NOW,
+        )
+
+    assert result.sent is False
+    assert preview.is_file()
+    assert "Strong jazz fit for your profile." in preview.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_run_completes_when_llm_returns_invalid_json(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DRY_RUN", "true")
+    preview = tmp_path / "uat_run" / "email_preview.html"
+    monkeypatch.setattr(
+        email_composer,
+        "email_preview_path",
+        lambda run_id: preview,
+    )
+
+    with patch(
+        "scene_scout.agents.email_composer.complete",
+        AsyncMock(side_effect=LLMValidationError("LLM response is not valid JSON")),
+    ):
+        result = await email_composer.run(
+            [_rec()],
+            _profile(),
+            TEST_RUN_ID,
+            curator_config=load_curator_config(),
+            now=NOW,
+        )
+
+    assert result.sent is False
+    assert preview.is_file()
+    assert "Allegra picked 1 event" in preview.read_text(encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_run_empty_recommendations_writes_preview_without_llm(
     tmp_path,

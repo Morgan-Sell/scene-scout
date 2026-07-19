@@ -168,6 +168,37 @@ def build_event_blocks(recommendations: list[CuratedRecommendation]) -> str:
     return "\n\n".join(blocks)
 
 
+def fallback_event_description(recommendation: CuratedRecommendation) -> str:
+    """Return deterministic copy when the LLM omits or shortens descriptions."""
+    event = recommendation.event
+    description = event.description.strip() if event.description else ""
+    if description:
+        return description
+    return recommendation.explanation.strip() or event.title
+
+
+def align_event_descriptions(
+    recommendations: list[CuratedRecommendation],
+    llm_descriptions: list[str],
+) -> tuple[list[str], int]:
+    """Pad or trim LLM descriptions to match recommendation count.
+
+    Returns aligned descriptions and the number of fallback rows used.
+    """
+    expected = len(recommendations)
+    aligned: list[str] = []
+    fallback_count = 0
+
+    for index, recommendation in enumerate(recommendations):
+        if index < len(llm_descriptions) and llm_descriptions[index].strip():
+            aligned.append(llm_descriptions[index].strip())
+        else:
+            aligned.append(fallback_event_description(recommendation))
+            fallback_count += 1
+
+    return aligned[:expected], fallback_count
+
+
 def render_html_email(
     recommendations: list[CuratedRecommendation],
     *,
@@ -274,22 +305,56 @@ async def _generate_copy(
     now: datetime,
 ) -> EmailComposerLLMOutput:
     """Generate intro and event descriptions via LLM."""
-    return await complete(
-        prompt=render_prompt(
-            "email_composer",
+    logger = get_logger("email_composer", run_id=run_id)
+    try:
+        return await complete(
+            prompt=render_prompt(
+                "email_composer",
+                curator_name=curator_name,
+                user_name=profile.name,
+                profile_summary=_profile_summary(profile),
+                recommendation_count=len(recommendations),
+                week_of=_week_of_label(recommendations, now=now),
+                event_blocks=build_event_blocks(recommendations),
+                below_minimum=below_minimum,
+            ),
+            system=_SYSTEM_PROMPT,
+            response_model=EmailComposerLLMOutput,
+            run_id=run_id,
+            agent_name="email_composer",
+        )
+    except LLMValidationError as exc:
+        logger.warning(
+            "Email copy LLM validation failed; using fallback copy",
+            data={"error": str(exc), "recommendation_count": len(recommendations)},
+        )
+        return fallback_llm_output(
+            recommendations,
+            profile,
             curator_name=curator_name,
-            user_name=profile.name,
-            profile_summary=_profile_summary(profile),
-            recommendation_count=len(recommendations),
-            week_of=_week_of_label(recommendations, now=now),
-            event_blocks=build_event_blocks(recommendations),
             below_minimum=below_minimum,
-        ),
-        system=_SYSTEM_PROMPT,
-        response_model=EmailComposerLLMOutput,
-        run_id=run_id,
-        agent_name="email_composer",
+        )
+
+
+def fallback_llm_output(
+    recommendations: list[CuratedRecommendation],
+    profile: UserProfile,
+    *,
+    curator_name: str,
+    below_minimum: bool,
+) -> EmailComposerLLMOutput:
+    """Return deterministic email copy when the LLM response is invalid."""
+    count = len(recommendations)
+    intro = (
+        f"Hi {profile.name}, {curator_name} picked {count} event"
+        f"{'' if count == 1 else 's'} worth your time this week."
     )
+    if below_minimum or count < 10:
+        intro += (
+            f" It was a slim week — {curator_name} could not find a full ten "
+            "that matched your taste, but these are the standouts."
+        )
+    return EmailComposerLLMOutput(intro_paragraph=intro, event_descriptions=[])
 
 
 async def run(
@@ -360,18 +425,25 @@ async def run(
         run_id=run_id,
         now=reference,
     )
-    if len(llm_output.event_descriptions) != len(recs):
-        raise LLMValidationError(
-            "LLM returned "
-            f"{len(llm_output.event_descriptions)} event descriptions for "
-            f"{len(recs)} recommendations"
+    event_descriptions, fallback_count = align_event_descriptions(
+        recs,
+        llm_output.event_descriptions,
+    )
+    if fallback_count:
+        logger.warning(
+            "Email copy used fallback event descriptions",
+            data={
+                "recommendation_count": len(recs),
+                "llm_description_count": len(llm_output.event_descriptions),
+                "fallback_count": fallback_count,
+            },
         )
 
     subject = build_subject(run_id, user_name=profile.name)
     html_body = render_html_email(
         recs,
         intro_paragraph=llm_output.intro_paragraph,
-        event_descriptions=llm_output.event_descriptions,
+        event_descriptions=event_descriptions,
         curator_name=config.name,
         user_name=profile.name,
     )
