@@ -37,9 +37,7 @@ class EmailComposerLLMOutput(BaseModel):
                     coerced.append(item)
                 elif isinstance(item, dict):
                     text = (
-                        item.get("description")
-                        or item.get("text")
-                        or item.get("body")
+                        item.get("description") or item.get("text") or item.get("body")
                     )
                     if text is not None:
                         coerced.append(str(text))
