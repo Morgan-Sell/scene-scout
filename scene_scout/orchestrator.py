@@ -19,6 +19,7 @@ from scene_scout.agents import (
     deduplication,
     description_quality,
     email_composer,
+    evaluation,
     event_extraction,
     event_normalization,
     feed_scout,
@@ -1249,8 +1250,12 @@ class Orchestrator:
             result.email_preview_path = str(email_result.preview_path)
         result.email_sent = email_result.sent
 
+        evaluation_report = await evaluation.run(curated, profile, run_id)
+        result.evaluation_flags = len(evaluation_report.flagged_recommendations) + len(
+            evaluation_report.list_level_issues
+        )
+
         result.enrichment_cache_hit_rates_pct = cache.enrichment_cache_hit_rates()
-        result.evaluation_flags = 0
         cache.log_run_stats()
 
         if _should_stop_after(uat_options.stop_after, "email"):
@@ -1281,6 +1286,8 @@ class Orchestrator:
                 "curated_recommendations": result.curated_recommendations,
                 "email_sent": result.email_sent,
                 "email_preview_path": result.email_preview_path,
+                "evaluation_flags": result.evaluation_flags,
+                "overall_quality": evaluation_report.overall_quality,
             },
         )
 

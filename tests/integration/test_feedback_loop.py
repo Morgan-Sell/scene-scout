@@ -23,6 +23,7 @@ from scene_scout.db.urls import database_feedback_url, database_history_url
 from scene_scout.models.curated import CuratedRecommendation, CuratorResult
 from scene_scout.models.email import EmailComposerResult
 from scene_scout.models.enrichment import EnrichedEvent
+from scene_scout.models.evaluation import EvaluationReport
 from scene_scout.models.event import NormalizedEvent
 from scene_scout.models.feedback import FeedbackEvent
 from scene_scout.models.history import RecommendationRecord
@@ -287,6 +288,19 @@ async def _run_pipeline(
                 subject="[UAT] Allegra",
                 preview_path=None,
                 sent=False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.evaluation.run",
+        AsyncMock(
+            return_value=EvaluationReport(
+                run_id=TEST_RUN_ID,
+                recommendation_count=1,
+                overall_quality=0.85,
+                flagged_recommendations=[],
+                list_level_issues=[],
+                summary="Strong jazz recommendation list.",
             )
         ),
     )
