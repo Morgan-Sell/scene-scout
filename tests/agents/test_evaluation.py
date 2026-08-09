@@ -1,11 +1,14 @@
 """
 Tests for the Evaluation Agent.
+
+Covers LLM-backed quality reporting: generic explanation detection, missing field
+flagging, category diversity checks, persistence, and validation fallback.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -40,33 +43,43 @@ def _profile() -> UserProfile:
     )
 
 
-def _rec(**overrides: object) -> CuratedRecommendation:
-    event = EnrichedEvent.model_validate(
-        {
-            "id": "event-jazz-1",
-            "title": "Silver Lake Jazz Night",
-            "start_datetime": EVENT_TIME,
-            "venue": "The Sandlot",
-            "city": "Los Angeles",
-            "url": "https://example.com/jazz-night",
-            "is_free": False,
-            "description": "An intimate jazz set under the floodlights.",
-            "categories": ["Jazz"],
-            "source_feeds": ["sandlot-pickup-league"],
-            "source_count": 1,
-            "best_source_feed": "sandlot-pickup-league",
-            "source_quality_score": 0.8,
-            "description_quality_score": 0.85,
-            "low_information": False,
-            "run_id": TEST_RUN_ID,
-            "normalized_at": NOW,
-            "vibe_tags": ["intimate"],
-            "neighborhood_context": "Walkable from Echo Park.",
-        }
-    )
+def _event(**overrides: object) -> EnrichedEvent:
     payload = {
-        "rank": 1,
-        "event": event,
+        "id": "event-jazz-1",
+        "title": "Silver Lake Jazz Night",
+        "start_datetime": EVENT_TIME,
+        "venue": "The Sandlot",
+        "city": "Los Angeles",
+        "url": "https://example.com/jazz-night",
+        "is_free": False,
+        "description": "An intimate jazz set under the floodlights.",
+        "categories": ["Jazz"],
+        "source_feeds": ["sandlot-pickup-league"],
+        "source_count": 1,
+        "best_source_feed": "sandlot-pickup-league",
+        "source_quality_score": 0.8,
+        "description_quality_score": 0.85,
+        "low_information": False,
+        "run_id": TEST_RUN_ID,
+        "normalized_at": NOW,
+        "vibe_tags": ["intimate"],
+        "neighborhood_context": "Walkable from Echo Park.",
+    }
+    payload.update(overrides)
+    return EnrichedEvent.model_validate(payload)
+
+
+def _rec(
+    *,
+    rank: int = 1,
+    event: EnrichedEvent | None = None,
+    explanation: str = "Strong jazz fit for your profile.",
+    **overrides: object,
+) -> CuratedRecommendation:
+    resolved_event = event or _event()
+    payload = {
+        "rank": rank,
+        "event": resolved_event,
         "score": 0.82,
         "score_breakdown": {
             "category_fit": 0.8,
@@ -79,8 +92,8 @@ def _rec(**overrides: object) -> CuratedRecommendation:
             "source_coverage": 0.33,
             "description_quality": 0.85,
         },
-        "explanation": "Strong jazz fit for your profile.",
-        "neighborhood_context": "Walkable from Echo Park.",
+        "explanation": explanation,
+        "neighborhood_context": resolved_event.neighborhood_context,
         "sellout_risk": "low",
         "feedback_token": generate_feedback_token(),
         "is_wildcard": False,
@@ -91,15 +104,153 @@ def _rec(**overrides: object) -> CuratedRecommendation:
     return CuratedRecommendation.model_validate(payload)
 
 
+@pytest.fixture
+def evaluation_output_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr("scene_scout.email_composer_config.PROJECT_ROOT", tmp_path)
+    return tmp_path
+
+
+async def _run_with_llm_output(
+    recommendations: list[CuratedRecommendation],
+    llm_output: EvaluationLLMOutput,
+) -> tuple[object, AsyncMock]:
+    mock_complete = AsyncMock(return_value=llm_output)
+    with patch("scene_scout.agents.evaluation.complete", mock_complete):
+        report = await evaluation.run(recommendations, _profile(), TEST_RUN_ID)
+    return report, mock_complete
+
+
+def _complete_prompt(mock_complete: AsyncMock) -> str:
+    call = mock_complete.await_args
+    assert call is not None
+    if "prompt" in call.kwargs:
+        return str(call.kwargs["prompt"])
+    return str(call.args[0])
+
+
+@pytest.mark.asyncio
+async def test_run_surfaces_generic_explanation_flag_from_llm(
+    evaluation_output_dir: Path,
+) -> None:
+    recommendation = _rec(
+        explanation="This matches your interests and would be a good fit for you.",
+    )
+    llm_output = EvaluationLLMOutput(
+        overall_quality=0.58,
+        flagged_recommendations=[
+            FlaggedRecommendation(
+                rank=1,
+                issue_type="generic_explanation",
+                description=(
+                    "Explanation is boilerplate and could apply to any event."
+                ),
+            )
+        ],
+        list_level_issues=[],
+        summary="One recommendation uses a generic explanation.",
+    )
+
+    report, mock_complete = await _run_with_llm_output([recommendation], llm_output)
+
+    assert report.flagged_recommendations[0].issue_type == "generic_explanation"
+    assert report.flagged_recommendations[0].rank == 1
+    assert "generic" in report.summary.lower()
+    prompt = _complete_prompt(mock_complete)
+    assert f"Why picked: {recommendation.explanation}" in prompt
+    assert recommendation.event.title in prompt
+
+
+@pytest.mark.asyncio
+async def test_run_surfaces_missing_field_flag_from_llm(
+    evaluation_output_dir: Path,
+) -> None:
+    incomplete_event = _event(description="", venue="TBD")
+    recommendation = _rec(
+        event=incomplete_event,
+        explanation="Worth checking out this week.",
+    )
+    llm_output = EvaluationLLMOutput(
+        overall_quality=0.42,
+        flagged_recommendations=[
+            FlaggedRecommendation(
+                rank=1,
+                issue_type="missing_field",
+                description="Event description is empty and venue is placeholder.",
+            )
+        ],
+        list_level_issues=[],
+        summary="Recommendation is missing critical event details.",
+    )
+
+    report, mock_complete = await _run_with_llm_output([recommendation], llm_output)
+
+    flag = report.flagged_recommendations[0]
+    assert flag.issue_type == "missing_field"
+    assert "description" in flag.description.lower()
+    prompt = _complete_prompt(mock_complete)
+    assert "Venue: TBD" in prompt
+    assert incomplete_event.title in prompt
+
+
+@pytest.mark.asyncio
+async def test_run_surfaces_category_diversity_list_issue_from_llm(
+    evaluation_output_dir: Path,
+) -> None:
+    recommendations = [
+        _rec(
+            rank=1,
+            event=_event(
+                id="jazz-1",
+                title="Silver Lake Jazz Night",
+                categories=["Jazz"],
+            ),
+        ),
+        _rec(
+            rank=2,
+            event=_event(
+                id="jazz-2",
+                title="Downtown Jazz Jam",
+                categories=["Jazz"],
+                start_datetime=EVENT_TIME + timedelta(days=1),
+            ),
+        ),
+        _rec(
+            rank=3,
+            event=_event(
+                id="jazz-3",
+                title="Echo Park Jazz Social",
+                categories=["Jazz"],
+                start_datetime=EVENT_TIME + timedelta(days=2),
+            ),
+        ),
+    ]
+    llm_output = EvaluationLLMOutput(
+        overall_quality=0.61,
+        flagged_recommendations=[],
+        list_level_issues=[
+            (
+                "All three recommendations are Jazz events with limited "
+                "category diversity."
+            ),
+        ],
+        summary="List skews heavily toward a single category.",
+    )
+
+    report, mock_complete = await _run_with_llm_output(recommendations, llm_output)
+
+    assert report.flagged_recommendations == []
+    assert len(report.list_level_issues) == 1
+    assert "category diversity" in report.list_level_issues[0].lower()
+    assert report.recommendation_count == 3
+    prompt = _complete_prompt(mock_complete)
+    assert prompt.count("Categories: Jazz") == 3
+    assert mock_complete.await_args.kwargs["response_model"] is EvaluationLLMOutput
+
+
 @pytest.mark.asyncio
 async def test_run_writes_evaluation_report_with_llm_output(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    evaluation_output_dir: Path,
 ) -> None:
-    monkeypatch.setattr(
-        "scene_scout.email_composer_config.PROJECT_ROOT",
-        tmp_path,
-    )
     llm_output = EvaluationLLMOutput(
         overall_quality=0.78,
         flagged_recommendations=[
@@ -113,11 +264,7 @@ async def test_run_writes_evaluation_report_with_llm_output(
         summary="Mostly strong picks with one generic explanation.",
     )
 
-    with patch(
-        "scene_scout.agents.evaluation.complete",
-        AsyncMock(return_value=llm_output),
-    ):
-        report = await evaluation.run([_rec()], _profile(), TEST_RUN_ID)
+    report, _ = await _run_with_llm_output([_rec()], llm_output)
 
     assert report.overall_quality == pytest.approx(0.78)
     assert len(report.flagged_recommendations) == 1
@@ -131,14 +278,8 @@ async def test_run_writes_evaluation_report_with_llm_output(
 
 @pytest.mark.asyncio
 async def test_run_empty_recommendations_writes_zero_quality_report(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    evaluation_output_dir: Path,
 ) -> None:
-    monkeypatch.setattr(
-        "scene_scout.email_composer_config.PROJECT_ROOT",
-        tmp_path,
-    )
-
     report = await evaluation.run([], _profile(), TEST_RUN_ID)
 
     assert report.recommendation_count == 0
@@ -150,14 +291,8 @@ async def test_run_empty_recommendations_writes_zero_quality_report(
 
 @pytest.mark.asyncio
 async def test_run_uses_fallback_when_llm_validation_fails(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    evaluation_output_dir: Path,
 ) -> None:
-    monkeypatch.setattr(
-        "scene_scout.email_composer_config.PROJECT_ROOT",
-        tmp_path,
-    )
-
     with patch(
         "scene_scout.agents.evaluation.complete",
         AsyncMock(side_effect=LLMValidationError("invalid json")),
