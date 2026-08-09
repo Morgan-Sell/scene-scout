@@ -47,6 +47,7 @@ class RankedEvent(BaseModel):
     novelty_penalty_applied: bool = False
     wildcard_slot: bool = False
     sellout_risk: SelloutRisk | None = None
+    sellout_urgency_note: str | None = None
     run_id: str
 
     @field_validator("sellout_risk")

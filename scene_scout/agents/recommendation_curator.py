@@ -57,12 +57,6 @@ def _event_date(event: EnrichedEvent) -> date:
     return event.start_datetime.astimezone(timezone.utc).date()
 
 
-def _urgency_note(ranked_event: RankedEvent) -> str | None:
-    if ranked_event.sellout_risk == "high":
-        return "Tickets may sell out quickly."
-    return None
-
-
 def _category_counts(selected: list[RankedEvent]) -> Counter[str]:
     counts: Counter[str] = Counter()
     for ranked_event in selected:
@@ -267,7 +261,7 @@ def build_curated_recommendations(
                 explanation=ranked_event.explanation,
                 neighborhood_context=event.neighborhood_context,
                 sellout_risk=ranked_event.sellout_risk or "low",
-                sellout_urgency_note=_urgency_note(ranked_event),
+                sellout_urgency_note=ranked_event.sellout_urgency_note,
                 feedback_token=generate_feedback_token(),
                 is_wildcard=flags[event.id],
                 run_id=run_id,

@@ -187,6 +187,20 @@ def test_build_event_blocks_includes_pass_through_fields() -> None:
     assert "Wildcard slot: yes" in block
 
 
+def test_render_html_email_includes_urgency_note_when_present() -> None:
+    recommendation = _rec(sellout_urgency_note="Tickets may sell out quickly.")
+    html_body = email_composer.render_html_email(
+        [recommendation],
+        intro_paragraph="This week has a strong jazz lean.",
+        event_descriptions=["The quartet plays an intimate set under the lights."],
+        curator_name="Allegra",
+        user_name="Morgan",
+        tracking_base_url=TRACKING_BASE,
+    )
+
+    assert "<strong>Tickets may sell out quickly.</strong>" in html_body
+
+
 def test_render_html_email_includes_tracking_links_and_pass_through_copy() -> None:
     recommendation = _rec()
     html_body = email_composer.render_html_email(

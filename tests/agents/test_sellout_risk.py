@@ -149,6 +149,51 @@ def test_classify_event_risk_low_for_large_paid_distant_event() -> None:
     assert sellout_risk.classify_event_risk(ranked, now=NOW) == "low"
 
 
+def test_urgency_note_for_risk_only_on_high_band() -> None:
+    assert (
+        sellout_risk.urgency_note_for_risk("high")
+        == sellout_risk.HIGH_RISK_URGENCY_NOTE
+    )
+    assert sellout_risk.urgency_note_for_risk("medium") is None
+    assert sellout_risk.urgency_note_for_risk("low") is None
+
+
+def test_annotate_event_risk_sets_urgency_note_for_high_events() -> None:
+    ranked = _ranked(
+        venue="Basement Club",
+        is_free=True,
+        start_datetime=NOW + timedelta(days=1),
+        description="Final release — selling fast before doors open.",
+        top_performer_affinity=0.95,
+    )
+
+    updated = sellout_risk.annotate_event_risk(ranked, now=NOW)
+
+    assert updated.sellout_risk == "high"
+    assert updated.sellout_urgency_note == sellout_risk.HIGH_RISK_URGENCY_NOTE
+
+
+def test_annotate_event_risk_clears_urgency_note_for_low_events() -> None:
+    ranked = _ranked(
+        venue="Memorial Coliseum Stadium",
+        is_free=False,
+        price_cents=12000,
+        start_datetime=NOW + timedelta(days=60),
+        description="Tickets available all month.",
+        top_performer_affinity=0.1,
+    ).model_copy(
+        update={
+            "sellout_risk": "high",
+            "sellout_urgency_note": "Stale note from an earlier run.",
+        },
+    )
+
+    updated = sellout_risk.annotate_event_risk(ranked, now=NOW)
+
+    assert updated.sellout_risk == "low"
+    assert updated.sellout_urgency_note is None
+
+
 @pytest.mark.asyncio
 async def test_run_assigns_risk_to_every_ranked_event() -> None:
     events = [
@@ -170,6 +215,10 @@ async def test_run_assigns_risk_to_every_ranked_event() -> None:
     assert all(item.sellout_risk in {"low", "medium", "high"} for item in results)
     assert results[0].sellout_risk is not None
     assert results[1].sellout_risk is not None
+    high_result = next(item for item in results if item.sellout_risk == "high")
+    low_result = next(item for item in results if item.sellout_risk == "low")
+    assert high_result.sellout_urgency_note == sellout_risk.HIGH_RISK_URGENCY_NOTE
+    assert low_result.sellout_urgency_note is None
 
 
 @pytest.mark.asyncio

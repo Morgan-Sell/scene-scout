@@ -9,7 +9,7 @@ price, date proximity, description language, and performer demand signals.
 Design
 ------
 Inputs  : list[RankedEvent], run_id: str
-Outputs : list[RankedEvent] with ``sellout_risk`` populated
+Outputs : list[RankedEvent] with ``sellout_risk`` and ``sellout_urgency_note`` populated
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from scene_scout.sellout_risk_config import (
     DAYS_NEAR,
     DAYS_SOON,
     DAYS_VERY_SOON,
+    HIGH_RISK_URGENCY_NOTE,
     HIGH_URGENCY_PHRASES,
     LARGE_VENUE_TOKENS,
     LOW_URGENCY_PHRASES,
@@ -190,6 +191,28 @@ def classify_event_risk(
     return classify_risk(score)
 
 
+def urgency_note_for_risk(risk: SelloutRisk) -> str | None:
+    """Return the user-facing urgency note for ``risk``, if any."""
+    if risk == "high":
+        return HIGH_RISK_URGENCY_NOTE
+    return None
+
+
+def annotate_event_risk(
+    ranked_event: RankedEvent,
+    *,
+    now: datetime | None = None,
+) -> RankedEvent:
+    """Classify sell-out risk and attach the matching urgency note."""
+    risk = classify_event_risk(ranked_event, now=now)
+    return ranked_event.model_copy(
+        update={
+            "sellout_risk": risk,
+            "sellout_urgency_note": urgency_note_for_risk(risk),
+        },
+    )
+
+
 def compute_risk_distribution(events: list[RankedEvent]) -> dict[str, int]:
     """Count sell-out risk bands across ranked events."""
     distribution = {"low": 0, "medium": 0, "high": 0}
@@ -220,21 +243,21 @@ async def run(
     Returns
     -------
     list[RankedEvent]
-        Input events with ``sellout_risk`` populated.
+        Input events with ``sellout_risk`` and ``sellout_urgency_note`` populated.
     """
     logger = get_logger("sellout_risk", run_id=run_id)
     scored: list[RankedEvent] = []
 
     for ranked_event in events:
-        risk = classify_event_risk(ranked_event, now=now)
-        updated = ranked_event.model_copy(update={"sellout_risk": risk})
+        updated = annotate_event_risk(ranked_event, now=now)
         scored.append(updated)
         logger.info(
             "Classified sell-out risk",
             data={
                 "event_id": ranked_event.event.id,
                 "event_title": ranked_event.event.title,
-                "sellout_risk": risk,
+                "sellout_risk": updated.sellout_risk,
+                "sellout_urgency_note": updated.sellout_urgency_note,
             },
         )
 
