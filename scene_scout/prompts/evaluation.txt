@@ -3,6 +3,11 @@ recommendations and identify quality issues.
 
 User profile summary: {profile_summary}
 Run ID: {run_id}
+Recommendation count: {recommendation_count}
+
+Recommendations to review:
+
+{recommendation_blocks}
 
 For each recommendation, assess:
 1. Profile alignment: Does this event plausibly match the user's stated interests?

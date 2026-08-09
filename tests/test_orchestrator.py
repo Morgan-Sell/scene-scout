@@ -18,6 +18,7 @@ from scene_scout.logging import get_logger
 from scene_scout.models.curated import CuratorResult
 from scene_scout.models.email import EmailComposerResult
 from scene_scout.models.enrichment import EnrichedEvent
+from scene_scout.models.evaluation import EvaluationReport
 from scene_scout.models.event import (
     EventCandidate,
     EventCandidateLLMOutput,
@@ -131,6 +132,19 @@ def mock_pipeline_dependencies(
     monkeypatch.setattr(
         "scene_scout.orchestrator.email_composer.run",
         AsyncMock(side_effect=_email_side_effect),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.evaluation.run",
+        AsyncMock(
+            return_value=EvaluationReport(
+                run_id=TEST_RUN_ID,
+                recommendation_count=0,
+                overall_quality=0.8,
+                flagged_recommendations=[],
+                list_level_issues=[],
+                summary="Quality looks acceptable.",
+            )
+        ),
     )
 
 
