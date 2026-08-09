@@ -13,6 +13,9 @@ WEIGHT_PERFORMER_AFFINITY = 0.15
 RISK_THRESHOLD_HIGH = 0.62
 RISK_THRESHOLD_MEDIUM = 0.38
 
+# User-facing urgency copy for high-risk events (Email Composer surfaces this).
+HIGH_RISK_URGENCY_NOTE = "Tickets may sell out quickly."
+
 # Venue name tokens for capacity heuristics (checked in order: large, small, medium).
 LARGE_VENUE_TOKENS: tuple[str, ...] = (
     "arena",

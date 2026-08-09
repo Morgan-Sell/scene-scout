@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from scene_scout.agents import recommendation_curator
+from scene_scout.agents import recommendation_curator, sellout_risk
 from scene_scout.curator_config import (
     CURATOR_MAX_PER_CATEGORY,
     CURATOR_MAX_PER_VENUE,
@@ -250,12 +250,22 @@ def test_build_curated_recommendations_marks_wildcards_and_tokens() -> None:
     assert curated[0].is_wildcard is False
 
 
-def test_build_curated_recommendations_adds_high_risk_urgency_note() -> None:
-    risky = _ranked(
-        _event(event_id="risky", title="Risky Show", day_offset=1),
-        score=0.9,
-        sellout_risk="high",
+def test_build_curated_recommendations_passes_through_high_risk_urgency_note() -> None:
+    event = _event(
+        event_id="risky",
+        title="Risky Show",
+        day_offset=1,
+        venue="Basement Club",
+        score_seed=0.95,
+    ).model_copy(
+        update={
+            "is_free": True,
+            "description": "Final release — selling fast before doors open.",
+            "start_datetime": NOW + timedelta(days=1, hours=18),
+        }
     )
+    risky = sellout_risk.annotate_event_risk(_ranked(event, score=0.9), now=NOW)
+    assert risky.sellout_risk == "high"
 
     curated = recommendation_curator.build_curated_recommendations(
         [risky],
@@ -264,7 +274,7 @@ def test_build_curated_recommendations_adds_high_risk_urgency_note() -> None:
     )
 
     assert curated[0].sellout_risk == "high"
-    assert curated[0].sellout_urgency_note == "Tickets may sell out quickly."
+    assert curated[0].sellout_urgency_note == sellout_risk.HIGH_RISK_URGENCY_NOTE
 
 
 @pytest.mark.asyncio
