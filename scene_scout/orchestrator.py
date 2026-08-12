@@ -41,7 +41,7 @@ from scene_scout.config import (
     vol_pipeline_state_dir,
 )
 from scene_scout.db import run_migrations
-from scene_scout.logging import get_logger
+from scene_scout.logging import get_logger, prune_old_run_logs
 from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.event import (
     EventCandidate,
@@ -997,6 +997,7 @@ class Orchestrator:
         uat_dir = _uat_run_dir(uat_output_base, run_id)
         options = uat_options or UatRunOptions()
 
+        logger.info("Pruned expired run logs", data=prune_old_run_logs())
         logger.info("Pipeline started", data={"user_prompt_length": len(prompt)})
 
         try:

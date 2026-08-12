@@ -481,6 +481,34 @@ async def test_orchestrator_run_returns_zero_counts(pipeline_state_dir: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_prunes_expired_run_logs_at_start(logs_dir: Path) -> None:
+    expired = logs_dir / "20250101-120000.jsonl"
+    recent = logs_dir / "20260618-120000.jsonl"
+    expired.write_text('{"old": true}\n', encoding="utf-8")
+    recent.write_text('{"recent": true}\n', encoding="utf-8")
+
+    await Orchestrator().run(SANDLOT_PROMPT)
+
+    assert not expired.exists()
+    assert recent.exists()
+
+    run_logs = sorted(logs_dir.glob("*.jsonl"))
+    assert len(run_logs) == 2
+    current_run_log = run_logs[-1]
+    entries = [
+        json.loads(line)
+        for line in current_run_log.read_text(encoding="utf-8").strip().splitlines()
+    ]
+    prune_entry = next(
+        entry for entry in entries if entry["message"] == "Pruned expired run logs"
+    )
+    assert prune_entry["agent"] == "orchestrator"
+    assert prune_entry["data"]["deleted"] == 1
+    assert prune_entry["data"]["kept"] == 1
+    assert prune_entry["data"]["retention_days"] == 90
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_seen_entries_cache_hit_bypasses_extraction(
     pipeline_state_dir: Path,
     cache_db: Path,

@@ -7,10 +7,16 @@ and run_id attachment via constructor and set_run_id().
 
 import json
 import logging
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 
-from scene_scout.logging import get_logger
-from scene_scout.logging.logger import AGENT_COLORS, AgentLogger
+from scene_scout.logging import get_logger, prune_old_run_logs
+from scene_scout.logging.logger import (
+    AGENT_COLORS,
+    RUN_LOG_RETENTION_DAYS,
+    AgentLogger,
+)
 from tests.conftest import TEST_RUN_ID
 
 
@@ -136,3 +142,32 @@ def test_message_formatting_with_args(logs_dir: Path) -> None:
     )
     assert entry["message"] == "Feed failed: The Beast's Yard RSS — status=unreachable"
     assert entry["level"] == "WARNING"
+
+
+def test_prune_old_run_logs_deletes_expired_files(logs_dir: Path) -> None:
+    expired = logs_dir / "20250101-120000.jsonl"
+    recent = logs_dir / "20260618-120000.jsonl"
+    expired.write_text('{"old": true}\n', encoding="utf-8")
+    recent.write_text('{"recent": true}\n', encoding="utf-8")
+
+    now = datetime(2026, 6, 28, 12, 0, tzinfo=timezone.utc)
+    stats = prune_old_run_logs(now=now)
+
+    assert stats["deleted"] == 1
+    assert stats["kept"] == 1
+    assert stats["retention_days"] == RUN_LOG_RETENTION_DAYS
+    assert not expired.exists()
+    assert recent.exists()
+
+
+def test_prune_old_run_logs_uses_mtime_for_non_run_id_names(logs_dir: Path) -> None:
+    stale = logs_dir / "youre-killing-me-smalls.jsonl"
+    stale.write_text('{"test": true}\n', encoding="utf-8")
+    old_ts = datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp()
+    os.utime(stale, (old_ts, old_ts))
+
+    now = datetime(2026, 6, 28, 12, 0, tzinfo=timezone.utc)
+    stats = prune_old_run_logs(now=now)
+
+    assert stats["deleted"] == 1
+    assert not stale.exists()

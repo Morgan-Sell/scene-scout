@@ -9,6 +9,7 @@ All HTTP responses are mocked via respx so tests run offline and
 deterministically. We test our logic, not feedparser or httpx.
 """
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -133,6 +134,28 @@ async def test_successful_feed_returns_entries():
     assert reports[0].succeeded is True
     assert reports[0].entries_fetched == 2
     assert len(entries) == 2
+
+
+@respx.mock
+async def test_run_writes_structured_jsonl_summary(logs_dir: Path):
+    config = _make_config()
+    respx.get(config.url).mock(return_value=Response(200, text=MINIMAL_RSS))
+
+    await feed_scout.run([config], run_id=TEST_RUN_ID)
+
+    log_file = logs_dir / f"{TEST_RUN_ID}.jsonl"
+    assert log_file.exists()
+    entries = [
+        json.loads(line)
+        for line in log_file.read_text(encoding="utf-8").strip().splitlines()
+    ]
+    summary = next(
+        entry for entry in entries if entry["message"] == "Feed Scout complete"
+    )
+    assert summary["agent"] == "feed_scout"
+    assert summary["run_id"] == TEST_RUN_ID
+    assert summary["data"]["feeds_ok"] == 1
+    assert summary["data"]["total_entries"] == 2
 
 
 @respx.mock

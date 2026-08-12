@@ -30,20 +30,18 @@ Outputs : tuple[list[RawFeedEntry], list[FeedHealthReport]]
 """
 
 import asyncio
-import logging
 from urllib.parse import urlparse
 
 import httpx
 
 from scene_scout.agents.sources import CacheHooks, get_adapter
+from scene_scout.logging import get_logger
 from scene_scout.models.feed import (
     FeedConfig,
     FeedHealthReport,
     RawFeedEntry,
     SourceType,
 )
-
-logger = logging.getLogger(__name__)
 
 _FETCH_TIMEOUT_SECONDS = 10
 _USER_AGENT = "SceneScout/0.1 (event discovery agent)"
@@ -89,6 +87,8 @@ async def run(
         All raw entries fetched across all sources, and a health report for
         every source regardless of success or failure status.
     """
+    logger = get_logger("feed_scout", run_id=run_id)
+
     async with httpx.AsyncClient(
         timeout=_FETCH_TIMEOUT_SECONDS,
         follow_redirects=True,
@@ -113,27 +113,35 @@ async def run(
 
         if report.succeeded:
             logger.info(
-                "[%s] Feed OK: %s — %d entries fetched",
-                run_id,
-                report.feed_name,
-                report.entries_fetched,
+                "Feed OK",
+                data={
+                    "feed_id": report.feed_id,
+                    "feed_name": report.feed_name,
+                    "entries_fetched": report.entries_fetched,
+                    "etag_supported": report.etag_supported,
+                },
             )
         elif report.skipped:
             logger.info(
-                "[%s] Feed UNCHANGED (304): %s — skipped",
-                run_id,
-                report.feed_name,
+                "Feed unchanged",
+                data={
+                    "feed_id": report.feed_id,
+                    "feed_name": report.feed_name,
+                    "status": report.status.value,
+                },
             )
         else:
             logger.warning(
-                "[%s] Feed failed: %s — status=%s error=%s",
-                run_id,
-                report.feed_name,
-                report.status,
-                report.error_message,
+                "Feed failed",
+                data={
+                    "feed_id": report.feed_id,
+                    "feed_name": report.feed_name,
+                    "status": report.status.value,
+                    "error_message": report.error_message,
+                },
             )
 
-    _log_summary(run_id, health_reports)
+    _log_summary(logger, health_reports)
     return all_entries, health_reports
 
 
@@ -217,7 +225,7 @@ async def _fetch_source(
     return await adapter.fetch(config, run_id, cache_hooks)
 
 
-def _log_summary(run_id: str, reports: list[FeedHealthReport]) -> None:
+def _log_summary(logger, reports: list[FeedHealthReport]) -> None:
     """Log a summary of feed health across the full run."""
     total = len(reports)
     succeeded = sum(1 for r in reports if r.succeeded)
@@ -227,20 +235,22 @@ def _log_summary(run_id: str, reports: list[FeedHealthReport]) -> None:
     etag_supported = sum(1 for r in reports if r.etag_supported)
 
     logger.info(
-        "[%s] Feed Scout complete: %d/%d feeds OK, %d unchanged (304), "
-        "%d failed, %d total entries, %d/%d feeds support ETag",
-        run_id,
-        succeeded,
-        total,
-        unchanged,
-        failed,
-        total_entries,
-        etag_supported,
-        total,
+        "Feed Scout complete",
+        data={
+            "feeds_total": total,
+            "feeds_ok": succeeded,
+            "feeds_unchanged": unchanged,
+            "feeds_failed": failed,
+            "total_entries": total_entries,
+            "feeds_with_etag": etag_supported,
+        },
     )
 
     if failed > 0:
         failed_names = [
             r.feed_name for r in reports if not r.succeeded and not r.skipped
         ]
-        logger.warning("[%s] Failed feeds: %s", run_id, ", ".join(failed_names))
+        logger.warning(
+            "Failed feeds",
+            data={"feed_names": failed_names, "feeds_failed": failed},
+        )

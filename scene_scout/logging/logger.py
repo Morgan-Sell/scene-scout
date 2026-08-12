@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +52,9 @@ _LEVEL_STYLES: dict[int, Style] = {
 
 _file_locks: dict[Path, threading.Lock] = {}
 _logger_cache: dict[str, AgentLogger] = {}
+
+RUN_LOG_RETENTION_DAYS = 90
+_RUN_LOG_ID_FORMAT = "%Y%m%d-%H%M%S"
 
 
 def _logs_dir() -> Path:
@@ -250,3 +253,88 @@ def configure_log_level(level: int) -> None:
     """
     for logger in _logger_cache.values():
         logger.set_level(level)
+
+
+def _run_log_timestamp(stem: str) -> datetime | None:
+    """Parse a run log filename stem into a UTC timestamp.
+
+    Parameters
+    ----------
+    stem : str
+        Filename stem without extension (e.g. ``"20250606-143022"``).
+
+    Returns
+    -------
+    datetime | None
+        Parsed UTC timestamp, or ``None`` when the stem is not a run ID.
+    """
+    try:
+        return datetime.strptime(stem, _RUN_LOG_ID_FORMAT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _run_log_reference_time(path: Path) -> datetime | None:
+    """Return the best-effort timestamp associated with a run log file.
+
+    Uses the run ID embedded in the filename when parseable; otherwise falls
+    back to the file modification time for non-standard names (e.g. tests).
+    """
+    parsed = _run_log_timestamp(path.stem)
+    if parsed is not None:
+        return parsed
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return None
+
+
+def prune_old_run_logs(
+    retention_days: int = RUN_LOG_RETENTION_DAYS,
+    *,
+    now: datetime | None = None,
+) -> dict[str, int]:
+    """Delete structured run logs older than the retention window.
+
+    Called at pipeline start so ``vol-logs/`` keeps a rolling 90-day history.
+
+    Parameters
+    ----------
+    retention_days : int, optional
+        Number of days to retain run logs. Defaults to ``RUN_LOG_RETENTION_DAYS``.
+    now : datetime, optional
+        Reference time for age calculation. Defaults to current UTC time.
+
+    Returns
+    -------
+    dict[str, int]
+        Summary counts: ``deleted``, ``kept``, and ``skipped`` (unreadable files).
+    """
+    reference = now or datetime.now(timezone.utc)
+    cutoff = reference - timedelta(days=retention_days)
+    logs_dir = _logs_dir()
+
+    deleted = 0
+    kept = 0
+    skipped = 0
+
+    for path in logs_dir.glob("*.jsonl"):
+        log_time = _run_log_reference_time(path)
+        if log_time is None:
+            skipped += 1
+            continue
+        if log_time < cutoff:
+            try:
+                path.unlink()
+                deleted += 1
+            except OSError:
+                skipped += 1
+        else:
+            kept += 1
+
+    return {
+        "deleted": deleted,
+        "kept": kept,
+        "skipped": skipped,
+        "retention_days": retention_days,
+    }
