@@ -5,7 +5,9 @@ from scene_scout.logging.logger import (
     AgentLogger,
     configure_log_level,
     get_logger,
+    list_run_logs,
     prune_old_run_logs,
+    read_run_log_entries,
 )
 
 __all__ = [
@@ -13,5 +15,7 @@ __all__ = [
     "AgentLogger",
     "configure_log_level",
     "get_logger",
+    "list_run_logs",
     "prune_old_run_logs",
+    "read_run_log_entries",
 ]

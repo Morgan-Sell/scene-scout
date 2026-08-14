@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=DM+Sans:wght@300&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/style.css?v=2" />
+    <link rel="stylesheet" href="/style.css?v=3" />
   </head>
   <body>
     <div class="page">
@@ -45,9 +45,20 @@
         >
           Profile
         </button>
+        <button
+          type="button"
+          class="tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-dev"
+          id="tab-dev"
+          data-tab="dev"
+        >
+          Dev
+        </button>
       </nav>
 
-      <p class="subtitle">
+      <p id="page-subtitle" class="subtitle">
         Your city, how far ahead to look, and what you love. That's all Allegra needs.
       </p>
 
@@ -141,6 +152,93 @@
         </div>
       </section>
 
+      <section
+        id="panel-dev"
+        class="panel dev-panel"
+        role="tabpanel"
+        aria-labelledby="tab-dev"
+        hidden
+      >
+        <div class="dev-section">
+          <h2>Run logs</h2>
+          <div class="dev-controls">
+            <label>
+              Run
+              <select id="dev-run-select"></select>
+            </label>
+            <label>
+              Agent
+              <select id="dev-agent-filter">
+                <option value="">All agents</option>
+              </select>
+            </label>
+            <label>
+              Level
+              <select id="dev-level-filter">
+                <option value="">All levels</option>
+                <option value="DEBUG">DEBUG</option>
+                <option value="INFO">INFO</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+              </select>
+            </label>
+          </div>
+          <div id="dev-log-table" class="dev-table-wrap">
+            <p class="empty-state">Loading run logs…</p>
+          </div>
+        </div>
+
+        <div class="dev-section">
+          <h2>Feed health</h2>
+          <div id="dev-feed-metrics" class="dev-metrics"></div>
+          <div id="dev-feed-table" class="dev-table-wrap">
+            <p class="empty-state">Loading feed health…</p>
+          </div>
+        </div>
+
+        <div class="dev-section">
+          <h2>Dry-run pipeline</h2>
+          <p class="dev-note">
+            Runs the full pipeline without sending email. Preview appears below when complete.
+          </p>
+          <div class="dev-controls">
+            <label class="dev-grow">
+              Prompt override
+              <input
+                id="dev-dry-run-prompt"
+                type="text"
+                placeholder="Leave blank to use saved profile taste"
+              />
+            </label>
+            <button type="button" id="dev-dry-run-button" class="cta-button">
+              Start dry-run
+            </button>
+          </div>
+          <p id="dev-dry-run-status" class="status-message" hidden></p>
+          <iframe
+            id="dev-email-preview"
+            class="dev-preview-frame"
+            title="Email preview"
+            hidden
+          ></iframe>
+        </div>
+
+        <div class="dev-section">
+          <h2>Recommendation history</h2>
+          <div id="dev-history-table" class="dev-table-wrap">
+            <p class="empty-state">Loading history…</p>
+          </div>
+        </div>
+
+        <div class="dev-section">
+          <h2>Cache inspection</h2>
+          <div id="dev-cache-metrics" class="dev-metrics"></div>
+          <div id="dev-cache-table" class="dev-table-wrap">
+            <p class="empty-state">Loading cache stats…</p>
+          </div>
+        </div>
+      </section>
+
       <footer class="site-footer">
         <p>
           One profile, stored here. One email a week when your picks are ready
@@ -149,6 +247,7 @@
       </footer>
     </div>
 
-    <script src="/app.js?v=3"></script>
+    <script src="/app.js?v=4"></script>
+    <script src="/dev.js?v=1"></script>
   </body>
 </html>

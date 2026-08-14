@@ -13,7 +13,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,6 +26,16 @@ from scene_scout.models.user import (
     HORIZON_DAYS_MIN,
 )
 from scene_scout.services.llm import LLMInfrastructureError, LLMValidationError
+from scene_scout.web.dev_service import (
+    build_cache_inspection,
+    build_feed_health_dashboard,
+    email_preview_path_for_run,
+    get_dry_run_status,
+    get_recommendation_history,
+    get_run_logs,
+    list_recent_runs,
+    start_dry_run,
+)
 from scene_scout.web.endpoints import router as tracking_router
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -45,6 +55,14 @@ class OnboardingRequest(BaseModel):
     name: str = Field(min_length=1)
     email: str = Field(min_length=1)
     prompt: str = Field(min_length=1)
+
+
+class DryRunRequest(BaseModel):
+    """JSON body for Dev Section dry-run trigger."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str | None = None
 
 
 def _web_password() -> str | None:
@@ -208,6 +226,55 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_404_NOT_FOUND,
                 content={"error": "No profile saved yet."},
             )
+
+    @application.get("/api/dev/runs")
+    async def dev_runs(limit: int = 5) -> dict[str, object]:
+        return {"runs": list_recent_runs(limit=min(max(limit, 1), 20))}
+
+    @application.get("/api/dev/logs")
+    async def dev_logs(
+        run_id: str | None = None,
+        agent: str | None = None,
+        level: str | None = None,
+    ) -> dict[str, object]:
+        return get_run_logs(run_id=run_id, agent=agent, level=level)
+
+    @application.get("/api/dev/feed-health")
+    async def dev_feed_health() -> dict[str, object]:
+        return build_feed_health_dashboard()
+
+    @application.get("/api/dev/cache")
+    async def dev_cache() -> dict[str, object]:
+        return build_cache_inspection()
+
+    @application.get("/api/dev/history")
+    async def dev_history(days: int = 30) -> dict[str, object]:
+        return get_recommendation_history(days=min(max(days, 1), 365))
+
+    @application.get("/api/dev/dry-run/status")
+    async def dev_dry_run_status() -> dict[str, object]:
+        return get_dry_run_status()
+
+    @application.post("/api/dev/dry-run")
+    async def dev_dry_run(body: DryRunRequest | None = None) -> dict[str, object]:
+        prompt = body.prompt if body else None
+        return await start_dry_run(prompt)
+
+    @application.get("/api/dev/dry-run/preview")
+    async def dev_dry_run_preview(run_id: str | None = None):
+        resolved_run_id = run_id or get_dry_run_status().get("run_id")
+        if not resolved_run_id:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": "No dry-run preview available."},
+            )
+        preview_path = email_preview_path_for_run(str(resolved_run_id))
+        if preview_path is None:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": "Email preview not found for this run."},
+            )
+        return FileResponse(preview_path, media_type="text/html")
 
     application.include_router(tracking_router)
 

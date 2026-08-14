@@ -575,6 +575,12 @@ validation error (graceful fallback), vocabulary enforcement (vibe), `seen_entri
 TTL expiry (expired entry triggers re-extraction). Golden fixtures for 5 event types
 per enrichment agent.
 
+### 5.8 — Deferred Neighborhood Enrichment
+**Supplemental plan:** [`deferred_neighborhood_enrichment_plan.md`](deferred_neighborhood_enrichment_plan.md)
+**Done when:** Geocoding and Neighborhood Scout LLM run only for curated recommendations
+(post-curator), not all filtered events. Phase 1 batch covers Talent + Vibe only.
+Subphases A–E in the supplemental doc are complete; architecture diagram updated.
+
 ---
 
 ## Phase 6 — User Preference and Ranking

@@ -313,3 +313,107 @@ textarea {
   max-width: 32rem;
   line-height: 1.7;
 }
+
+.page-wide {
+  max-width: 72rem;
+}
+
+.dev-panel {
+  display: none;
+}
+
+.dev-section {
+  margin-bottom: 3rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dev-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.dev-section h2 {
+  margin: 0 0 1rem;
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 500;
+  font-size: 1.5rem;
+  color: var(--forest);
+}
+
+.dev-note {
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.dev-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.dev-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 10rem;
+}
+
+.dev-grow {
+  flex: 1 1 16rem;
+}
+
+.dev-controls select,
+.dev-controls input[type="text"] {
+  padding: 0.45rem 0;
+}
+
+.dev-table-wrap {
+  overflow-x: auto;
+}
+
+.dev-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.dev-table th,
+.dev-table td {
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.dev-table th {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cognac);
+}
+
+.dev-data {
+  margin: 0;
+  max-width: 24rem;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dev-metrics p {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+}
+
+.dev-preview-frame {
+  width: 100%;
+  min-height: 28rem;
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  background: #fff;
+}

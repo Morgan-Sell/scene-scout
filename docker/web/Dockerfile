@@ -11,6 +11,8 @@ ENV UV_COMPILE_BYTECODE=1 \
     WEB_SERVER_PORT=7860
 
 COPY pyproject.toml uv.lock ./
+COPY alembic.ini ./
+COPY alembic ./alembic
 COPY scene_scout ./scene_scout
 COPY config ./config
 

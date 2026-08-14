@@ -13,6 +13,13 @@ services:
       DRY_RUN: "true"
       VOL_LOGS_DIR: /app/vol-logs
       VOL_PIPELINE_STATE_DIR: /app/vol-pipeline-state
+      USER_EMAIL: ${USER_EMAIL:-}
+      USER_NAME: ${USER_NAME:-Friend}
+      UAT_HOME_CITY: ${UAT_HOME_CITY:-New York}
+      UAT_HORIZON_DAYS: ${UAT_HORIZON_DAYS:-14}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      TICKETMASTER_API_KEY: ${TICKETMASTER_API_KEY:-}
     volumes: &shared-volumes
       - vol-logs:/app/vol-logs
       - vol-pipeline-state:/app/vol-pipeline-state
@@ -35,6 +42,8 @@ services:
       WEB_PASSWORD: ${WEB_PASSWORD:-}
       VOL_LOGS_DIR: /app/vol-logs
       VOL_PIPELINE_STATE_DIR: /app/vol-pipeline-state
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
     volumes: *shared-volumes
 
 volumes:

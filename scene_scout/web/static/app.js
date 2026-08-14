@@ -11,6 +11,14 @@ const form = document.getElementById("onboarding-form");
 const statusEl = document.getElementById("onboarding-status");
 const summaryEl = document.getElementById("profile-summary");
 const profileDisplay = document.getElementById("profile-display");
+const pageSubtitle = document.getElementById("page-subtitle");
+
+const SUBTITLES = {
+  onboarding:
+    "Your city, how far ahead to look, and what you love. That's all Allegra needs.",
+  profile: "Allegra's read on your taste — stored here, used every week.",
+  dev: "Pipeline observability for operators — logs, feeds, cache, and dry-runs.",
+};
 
 function validateOnboarding(homeCity, horizonDays, name, email, prompt) {
   if (!homeCity.trim()) {
@@ -147,17 +155,23 @@ function activateTab(tabName) {
   });
 
   panels.forEach((panel) => {
-    const isOnboarding = panel.id === "panel-onboarding";
-    const isProfile = panel.id === "panel-profile";
-    const show =
-      (tabName === "onboarding" && isOnboarding) ||
-      (tabName === "profile" && isProfile);
+    const panelName = panel.id.replace("panel-", "");
+    const show = panelName === tabName;
     panel.classList.toggle("active", show);
     panel.hidden = !show;
   });
 
+  if (pageSubtitle && SUBTITLES[tabName]) {
+    pageSubtitle.textContent = SUBTITLES[tabName];
+  }
+
+  document.querySelector(".page")?.classList.toggle("page-wide", tabName === "dev");
+
   if (tabName === "profile") {
     loadProfile();
+  }
+  if (tabName === "dev" && typeof window.initDevSection === "function") {
+    window.initDevSection();
   }
 }
 
