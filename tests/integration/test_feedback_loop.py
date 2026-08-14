@@ -231,17 +231,14 @@ async def _run_pipeline(
     monkeypatch.setattr(
         "scene_scout.orchestrator._collect_enrichment_batch_requests",
         AsyncMock(
-            return_value=(
-                [
-                    BatchRequest(
-                        custom_id=f"vibe_classifier:{normalized.id}",
-                        prompt="Classify vibes.",
-                        system="Return JSON.",
-                        agent_name="vibe_classifier",
-                    )
-                ],
-                [],
-            )
+            return_value=[
+                BatchRequest(
+                    custom_id=f"vibe_classifier:{normalized.id}",
+                    prompt="Classify vibes.",
+                    system="Return JSON.",
+                    agent_name="vibe_classifier",
+                )
+            ]
         ),
     )
     monkeypatch.setattr(
