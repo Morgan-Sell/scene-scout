@@ -21,6 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError, field_validator
 
 from scene_scout.logging import get_logger
+from scene_scout.models.curated import CuratedRecommendation
 from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.neighborhood_scout_config import (
     MODE_GEO_ASSISTED,
@@ -413,3 +414,123 @@ async def run(
         },
     )
     return [enriched_by_id[event.id] for event in events]
+
+
+def _dedupe_representative_events(
+    recommendations: list[CuratedRecommendation],
+) -> dict[str, EnrichedEvent]:
+    """Return one representative event per unique venue cache key."""
+    representatives: dict[str, EnrichedEvent] = {}
+    for recommendation in recommendations:
+        venue_key = venue_cache_key(
+            recommendation.event.venue,
+            recommendation.event.city,
+        )
+        if venue_key not in representatives:
+            representatives[venue_key] = recommendation.event
+    return representatives
+
+
+def _count_curated_neighborhood_work(
+    representatives: dict[str, EnrichedEvent],
+    cache: CacheService,
+) -> tuple[int, int, int]:
+    """Return ``(cache_hits, geocode_calls, llm_calls)`` for curated enrichment."""
+    cache_hits = 0
+    geocode_calls = 0
+
+    for venue_key in representatives:
+        if resolve_neighborhood_from_cache(venue_key, cache) is not None:
+            cache_hits += 1
+            continue
+
+        cached = cache.get_venue(venue_key)
+        if cached is None or cached.coordinates is None:
+            geocode_calls += 1
+
+    llm_calls = len(representatives) - cache_hits
+    return cache_hits, geocode_calls, llm_calls
+
+
+def _apply_neighborhood_to_recommendation(
+    recommendation: CuratedRecommendation,
+    enriched: EnrichedEvent,
+) -> CuratedRecommendation:
+    """Copy neighborhood fields onto a curated recommendation and nested event."""
+    event_updates = {
+        "neighborhood_context": enriched.neighborhood_context,
+        "neighborhood_confidence": enriched.neighborhood_confidence,
+        "venue_coordinates": enriched.venue_coordinates,
+    }
+    return recommendation.model_copy(
+        update={
+            "neighborhood_context": enriched.neighborhood_context,
+            "event": recommendation.event.model_copy(update=event_updates),
+        }
+    )
+
+
+async def enrich_curated_neighborhoods(
+    recommendations: list[CuratedRecommendation],
+    *,
+    cache: CacheService,
+    run_id: str,
+) -> list[CuratedRecommendation]:
+    """Enrich final curated picks with neighborhood context after curation.
+
+    Deduplicates by venue so multiple recommendations at the same venue share one
+    geocode and LLM call. Uses ``run()`` inline without a second batch boundary.
+    """
+    logger = get_logger("neighborhood_scout", run_id=run_id)
+
+    if not recommendations:
+        logger.info(
+            "Curated neighborhood enrichment skipped",
+            data={
+                "recommendations": 0,
+                "neighborhood_cache_hits": 0,
+                "neighborhood_geocode_calls": 0,
+                "neighborhood_llm_calls": 0,
+            },
+        )
+        return []
+
+    representatives = _dedupe_representative_events(recommendations)
+    cache_hits, geocode_calls, llm_calls = _count_curated_neighborhood_work(
+        representatives,
+        cache,
+    )
+
+    enriched_events = await run(
+        list(representatives.values()),
+        run_id,
+        cache=cache,
+    )
+    enriched_by_venue = {
+        venue_cache_key(event.venue, event.city): event for event in enriched_events
+    }
+
+    enriched_recommendations = [
+        _apply_neighborhood_to_recommendation(
+            recommendation,
+            enriched_by_venue[
+                venue_cache_key(
+                    recommendation.event.venue,
+                    recommendation.event.city,
+                )
+            ],
+        )
+        for recommendation in recommendations
+    ]
+
+    logger.info(
+        "Curated neighborhood enrichment complete",
+        data={
+            "recommendations": len(recommendations),
+            "unique_venues": len(representatives),
+            "neighborhood_cache_hits": cache_hits,
+            "neighborhood_geocode_calls": geocode_calls,
+            "neighborhood_llm_calls": llm_calls,
+        },
+    )
+    return enriched_recommendations

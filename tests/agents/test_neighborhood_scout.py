@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from scene_scout.agents import neighborhood_scout
+from scene_scout.models.curated import CuratedRecommendation
 from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.event import NormalizedEvent, compute_normalized_event_id
 from scene_scout.neighborhood_scout_config import (
@@ -29,6 +30,7 @@ from scene_scout.services.batch import (
     ConcurrentBatchStrategy,
 )
 from scene_scout.services.cache import CacheService
+from scene_scout.services.feedback import generate_feedback_token
 from scene_scout.services.geocoding import venue_cache_key
 from tests.conftest import TEST_RUN_ID
 
@@ -98,6 +100,40 @@ def _enriched_event(**overrides: object) -> EnrichedEvent:
     if overrides:
         return base.model_copy(update=overrides)
     return base
+
+
+def _score_breakdown() -> dict[str, float]:
+    return {
+        "category_fit": 0.8,
+        "vibe_fit": 0.7,
+        "semantic_similarity": 0.0,
+        "performer_affinity": 0.7,
+        "location": 1.0,
+        "novelty": 1.0,
+        "source_quality": 0.8,
+        "source_coverage": 0.33,
+        "description_quality": 0.9,
+    }
+
+
+def _curated_recommendation(**overrides: object) -> CuratedRecommendation:
+    event = overrides.pop("event", _enriched_event())
+    payload = {
+        "rank": 1,
+        "event": event,
+        "score": 0.85,
+        "score_breakdown": _score_breakdown(),
+        "explanation": "Strong fit for your profile.",
+        "neighborhood_context": None,
+        "sellout_risk": "low",
+        "sellout_urgency_note": None,
+        "feedback_token": generate_feedback_token(),
+        "is_wildcard": False,
+        "run_id": TEST_RUN_ID,
+        "recommended_at": START,
+    }
+    payload.update(overrides)
+    return CuratedRecommendation.model_validate(payload)
 
 
 def _load_golden(name: str) -> dict:
@@ -385,6 +421,115 @@ async def test_apply_batch_results_returns_empty_on_validation_error(
 
     assert enriched[0].neighborhood_context is None
     assert enriched[0].neighborhood_confidence == 0.0
+
+
+@pytest.mark.asyncio
+async def test_enrich_curated_neighborhoods_dedupes_same_venue(
+    cache: CacheService,
+) -> None:
+    second_event = _enriched_event(
+        id=compute_normalized_event_id(
+            "Morning Sandlot Practice",
+            "Sun, Jun 8 2025",
+            VENUE,
+        ),
+        title="Morning Sandlot Practice",
+    )
+    recommendations = [
+        _curated_recommendation(rank=1, event=_enriched_event()),
+        _curated_recommendation(rank=2, event=second_event),
+    ]
+    mock_strategy = AsyncMock()
+    mock_strategy.submit = AsyncMock(return_value="batch-curated")
+    mock_strategy.poll = AsyncMock(
+        return_value=BatchResults(
+            batch_id="batch-curated",
+            status="completed",
+            results=[
+                BatchResultItem(
+                    custom_id=EVENT_ID,
+                    content=CONTEXT_JSON,
+                    success=True,
+                )
+            ],
+        )
+    )
+
+    with (
+        patch(
+            "scene_scout.agents.neighborhood_scout.geocode_venue",
+            AsyncMock(return_value=COORDINATES),
+        ) as mock_geocode,
+        patch(
+            "scene_scout.agents.neighborhood_scout.get_nearby_pois",
+            AsyncMock(return_value=POIS),
+        ),
+        patch(
+            "scene_scout.agents.neighborhood_scout.get_batch_strategy",
+            lambda: mock_strategy,
+        ),
+    ):
+        enriched = await neighborhood_scout.enrich_curated_neighborhoods(
+            recommendations,
+            cache=cache,
+            run_id=TEST_RUN_ID,
+        )
+
+    mock_geocode.assert_awaited_once()
+    mock_strategy.submit.assert_awaited_once()
+    assert enriched[0].neighborhood_context == enriched[1].neighborhood_context
+    assert (
+        enriched[0].event.neighborhood_context == enriched[1].event.neighborhood_context
+    )
+    assert enriched[0].event.venue_coordinates == COORDINATES
+
+
+@pytest.mark.asyncio
+async def test_enrich_curated_neighborhoods_uses_cache_without_external_calls(
+    cache: CacheService,
+) -> None:
+    cache.set_venue(
+        VENUE_KEY,
+        coordinates=COORDINATES,
+        neighborhood_context="Classic suburban sandlot vibes.",
+        neighborhood_confidence=0.82,
+    )
+    recommendations = [
+        _curated_recommendation(rank=1),
+        _curated_recommendation(
+            rank=2,
+            event=_enriched_event(
+                id=compute_normalized_event_id(
+                    "Morning Sandlot Practice",
+                    "Sun, Jun 8 2025",
+                    VENUE,
+                ),
+                title="Morning Sandlot Practice",
+            ),
+        ),
+    ]
+    mock_strategy = AsyncMock()
+
+    with (
+        patch(
+            "scene_scout.agents.neighborhood_scout.geocode_venue",
+            AsyncMock(),
+        ) as mock_geocode,
+        patch(
+            "scene_scout.agents.neighborhood_scout.get_batch_strategy",
+            lambda: mock_strategy,
+        ),
+    ):
+        enriched = await neighborhood_scout.enrich_curated_neighborhoods(
+            recommendations,
+            cache=cache,
+            run_id=TEST_RUN_ID,
+        )
+
+    mock_geocode.assert_not_called()
+    mock_strategy.submit.assert_not_called()
+    assert enriched[0].neighborhood_context == "Classic suburban sandlot vibes."
+    assert enriched[1].event.neighborhood_context == "Classic suburban sandlot vibes."
 
 
 @pytest.mark.parametrize("fixture_name", GOLDEN_FIXTURE_NAMES)
