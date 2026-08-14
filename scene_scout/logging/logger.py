@@ -338,3 +338,91 @@ def prune_old_run_logs(
         "skipped": skipped,
         "retention_days": retention_days,
     }
+
+
+def list_run_logs(limit: int = 5) -> list[dict[str, Any]]:
+    """Return metadata for the most recent structured run log files.
+
+    Parameters
+    ----------
+    limit : int, optional
+        Maximum number of runs to return. Defaults to 5.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        Run summaries sorted newest-first with ``run_id``, ``started_at``,
+        and ``entry_count``.
+    """
+    if limit < 1:
+        return []
+
+    log_files = sorted(
+        _logs_dir().glob("*.jsonl"),
+        key=lambda path: _run_log_reference_time(path) or datetime.min.replace(
+            tzinfo=timezone.utc
+        ),
+        reverse=True,
+    )
+
+    runs: list[dict[str, Any]] = []
+    for path in log_files[:limit]:
+        reference = _run_log_reference_time(path)
+        try:
+            entry_count = sum(
+                1
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            )
+        except OSError:
+            entry_count = 0
+        runs.append(
+            {
+                "run_id": path.stem,
+                "started_at": reference.isoformat() if reference else None,
+                "entry_count": entry_count,
+            }
+        )
+    return runs
+
+
+def read_run_log_entries(
+    run_id: str,
+    *,
+    agent: str | None = None,
+    level: str | None = None,
+) -> list[dict[str, Any]]:
+    """Read structured JSONL entries for a pipeline run.
+
+    Parameters
+    ----------
+    run_id : str
+        Run identifier matching ``vol-logs/{run_id}.jsonl``.
+    agent : str, optional
+        When set, only entries for this agent are returned.
+    level : str, optional
+        When set, only entries at this level (e.g. ``"INFO"``) are returned.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        Parsed log entries in file order.
+    """
+    log_path = _logs_dir() / f"{run_id}.jsonl"
+    if not log_path.is_file():
+        return []
+
+    entries: list[dict[str, Any]] = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if agent is not None and entry.get("agent") != agent:
+            continue
+        if level is not None and entry.get("level") != level:
+            continue
+        entries.append(entry)
+    return entries

@@ -11,6 +11,8 @@ ENV UV_COMPILE_BYTECODE=1 \
     DRY_RUN=true
 
 COPY pyproject.toml uv.lock ./
+COPY alembic.ini ./
+COPY alembic ./alembic
 COPY scene_scout ./scene_scout
 COPY config ./config
 
@@ -18,8 +20,4 @@ RUN uv sync --frozen --no-dev
 
 COPY README.md ./
 
-CMD [
-    "uv", "run", "python", "-m", "scene_scout.cli", "uat",
-    "--prompt", "Docker pipeline stub run",
-    "--dry-run",
-]
+CMD ["uv", "run", "python", "-m", "scene_scout.cli", "uat", "--prompt", "Docker pipeline stub run", "--dry-run"]
