@@ -176,8 +176,7 @@ def build_feed_health_dashboard() -> dict[str, Any]:
                 "feed_name": config.name,
                 "feed_url": config.url,
                 "active": config.active,
-                "status": log_row.get("status")
-                or (summary_row or {}).get("status"),
+                "status": log_row.get("status") or (summary_row or {}).get("status"),
                 "entries_fetched": log_row.get("entries_fetched")
                 if log_row
                 else (summary_row or {}).get("entries_fetched"),
@@ -248,9 +247,7 @@ def build_cache_inspection() -> dict[str, Any]:
                 {
                     "cache_type": "performer_cache",
                     "ttl_days": ttl_days["performer_cache"],
-                    **_table_stats(
-                        conn, "performer_cache", expiry_column="expires_at"
-                    ),
+                    **_table_stats(conn, "performer_cache", expiry_column="expires_at"),
                 }
             )
             venue_total = conn.execute("SELECT COUNT(*) FROM venue_cache").fetchone()[0]

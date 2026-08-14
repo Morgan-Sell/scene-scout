@@ -359,8 +359,8 @@ def list_run_logs(limit: int = 5) -> list[dict[str, Any]]:
 
     log_files = sorted(
         _logs_dir().glob("*.jsonl"),
-        key=lambda path: _run_log_reference_time(path) or datetime.min.replace(
-            tzinfo=timezone.utc
+        key=lambda path: (
+            _run_log_reference_time(path) or datetime.min.replace(tzinfo=timezone.utc)
         ),
         reverse=True,
     )
