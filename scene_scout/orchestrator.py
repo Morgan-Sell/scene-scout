@@ -23,7 +23,6 @@ from scene_scout.agents import (
     event_extraction,
     event_normalization,
     feed_scout,
-    neighborhood_scout,
     ranking,
     recommendation_curator,
     sellout_risk,
@@ -63,7 +62,6 @@ from scene_scout.pre_enrichment_filter_config import PRE_ENRICHMENT_HARD_EXCLUDE
 from scene_scout.services import history as history_service
 from scene_scout.services.batch import BatchRequest, BatchResults, get_batch_strategy
 from scene_scout.services.cache import CacheService
-from scene_scout.services.geocoding import venue_cache_key
 
 _PIPELINE_STATE_FILENAME = "pipeline_state.json"
 
@@ -86,8 +84,6 @@ class PipelineState:
         dicts until ``NormalizedEvent`` is wired in Phase 4.
     batch_id : str, optional
         Provider batch job identifier once enrichment batch is submitted.
-    neighborhood_jobs : list[dict[str, Any]]
-        Serialized neighborhood scout jobs prepared during Phase 1 geocoding.
     stated_interests : list[str]
         User interest strings forwarded to the Talent Scout batch prompts.
     phase : str
@@ -97,7 +93,6 @@ class PipelineState:
     run_id: str
     filtered_events: list[dict[str, Any]] = field(default_factory=list)
     batch_id: str | None = None
-    neighborhood_jobs: list[dict[str, Any]] = field(default_factory=list)
     stated_interests: list[str] = field(default_factory=list)
     phase: PipelinePhase = "phase_1"
 
@@ -130,7 +125,6 @@ class PipelineState:
             run_id=payload["run_id"],
             filtered_events=payload.get("filtered_events", []),
             batch_id=payload.get("batch_id"),
-            neighborhood_jobs=payload.get("neighborhood_jobs", []),
             stated_interests=payload.get("stated_interests", []),
             phase=payload.get("phase", "phase_1"),
         )
@@ -633,32 +627,6 @@ def _batch_results_for_agent(
     )
 
 
-def _serialize_neighborhood_job(
-    job: neighborhood_scout.NeighborhoodScoutJob,
-) -> dict[str, Any]:
-    coordinates = job.coordinates
-    return {
-        "event": job.event.model_dump(mode="json"),
-        "venue_key": job.venue_key,
-        "mode": job.mode,
-        "poi_list": job.poi_list,
-        "coordinates": list(coordinates) if coordinates is not None else None,
-    }
-
-
-def _deserialize_neighborhood_job(
-    payload: dict[str, Any],
-) -> neighborhood_scout.NeighborhoodScoutJob:
-    raw_coordinates = payload.get("coordinates")
-    return neighborhood_scout.NeighborhoodScoutJob(
-        event=EnrichedEvent.model_validate(payload["event"]),
-        venue_key=str(payload["venue_key"]),
-        mode=payload["mode"],
-        poi_list=payload.get("poi_list", []),
-        coordinates=tuple(raw_coordinates) if raw_coordinates else None,
-    )
-
-
 def _stated_interests_from_prompt(prompt: str) -> list[str]:
     """Extract stated interests for Talent Scout prompts."""
     stripped = prompt.strip()
@@ -673,10 +641,9 @@ async def _collect_enrichment_batch_requests(
     cache: CacheService,
     stated_interests: list[str] | None,
     run_id: str,
-) -> tuple[list[BatchRequest], list[neighborhood_scout.NeighborhoodScoutJob]]:
-    """Build one combined batch request list for all enrichment agents."""
+) -> list[BatchRequest]:
+    """Build batch requests for Talent Scout and Vibe Classifier."""
     requests: list[BatchRequest] = []
-    neighborhood_jobs: list[neighborhood_scout.NeighborhoodScoutJob] = []
 
     for event in filtered:
         if has_named_performer(event.title, event.description):
@@ -717,28 +684,7 @@ async def _collect_enrichment_batch_requests(
                 )
             )
 
-        enriched = EnrichedEvent.from_normalized(event)
-        venue_key = venue_cache_key(event.venue, event.city)
-        if neighborhood_scout.resolve_neighborhood_from_cache(venue_key, cache) is None:
-            job = await neighborhood_scout.prepare_neighborhood_job(
-                enriched,
-                cache=cache,
-                run_id=run_id,
-            )
-            neighborhood_jobs.append(job)
-            neighborhood_request = neighborhood_scout.build_batch_request(job)
-            requests.append(
-                neighborhood_request.model_copy(
-                    update={
-                        "custom_id": _batch_custom_id(
-                            "neighborhood_scout",
-                            event.id,
-                        )
-                    }
-                )
-            )
-
-    return requests, neighborhood_jobs
+    return requests
 
 
 async def _poll_enrichment_batch(
@@ -772,13 +718,12 @@ async def _poll_enrichment_batch(
 async def _apply_enrichment_batch(
     filtered: list[NormalizedEvent],
     batch_results: BatchResults,
-    neighborhood_jobs: list[neighborhood_scout.NeighborhoodScoutJob],
     stated_interests: list[str] | None,
     *,
     cache: CacheService,
     run_id: str,
 ) -> list[EnrichedEvent]:
-    """Apply a completed enrichment batch through all three agents."""
+    """Apply a completed enrichment batch through Talent Scout and Vibe Classifier."""
     logger = get_logger("orchestrator", run_id=run_id)
 
     if batch_results.status == "failed":
@@ -789,10 +734,6 @@ async def _apply_enrichment_batch(
 
     talent_results = _batch_results_for_agent(batch_results, "talent_scout")
     vibe_results = _batch_results_for_agent(batch_results, "vibe_classifier")
-    neighborhood_results = _batch_results_for_agent(
-        batch_results,
-        "neighborhood_scout",
-    )
 
     after_talent = await talent_scout.run(
         filtered,
@@ -801,18 +742,11 @@ async def _apply_enrichment_batch(
         cache=cache,
         batch_results=talent_results,
     )
-    after_vibe = await vibe_classifier.run(
+    enriched = await vibe_classifier.run(
         after_talent,
         run_id,
         cache=cache,
         batch_results=vibe_results,
-    )
-    enriched = await neighborhood_scout.run(
-        after_vibe,
-        run_id,
-        cache=cache,
-        batch_results=neighborhood_results,
-        prepared_jobs=neighborhood_jobs if neighborhood_jobs else None,
     )
 
     logger.info(
@@ -1157,7 +1091,7 @@ class Orchestrator:
         ]
 
         stated_interests = _stated_interests_from_prompt(prompt)
-        batch_requests, neighborhood_jobs = await _collect_enrichment_batch_requests(
+        batch_requests = await _collect_enrichment_batch_requests(
             filtered,
             cache=cache,
             stated_interests=stated_interests,
@@ -1182,9 +1116,6 @@ class Orchestrator:
 
         state.filtered_events = [event.model_dump(mode="json") for event in filtered]
         state.batch_id = batch_id
-        state.neighborhood_jobs = [
-            _serialize_neighborhood_job(job) for job in neighborhood_jobs
-        ]
         state.stated_interests = stated_interests
         state.phase = "batch_submitted"
         write_pipeline_state(state)
@@ -1207,14 +1138,9 @@ class Orchestrator:
         filtered_events = [
             NormalizedEvent.model_validate(payload) for payload in state.filtered_events
         ]
-        restored_jobs = [
-            _deserialize_neighborhood_job(payload)
-            for payload in state.neighborhood_jobs
-        ]
         enriched = await _apply_enrichment_batch(
             filtered_events,
             batch_results,
-            restored_jobs,
             state.stated_interests,
             cache=cache,
             run_id=run_id,

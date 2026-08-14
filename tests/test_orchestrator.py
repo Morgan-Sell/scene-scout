@@ -1036,7 +1036,7 @@ async def test_orchestrator_writes_batch_id_to_pipeline_state(
 
     monkeypatch.setattr(
         "scene_scout.orchestrator._collect_enrichment_batch_requests",
-        AsyncMock(return_value=([batch_request], [])),
+        AsyncMock(return_value=[batch_request]),
     )
     monkeypatch.setattr(
         "scene_scout.orchestrator._poll_enrichment_batch",
