@@ -273,6 +273,32 @@ async def _run_pipeline(
         "scene_scout.orchestrator.recommendation_curator.run",
         capture_curator,
     )
+
+    async def _mock_enrich_curated_neighborhoods(
+        recommendations: list[CuratedRecommendation],
+        *,
+        cache: CacheService,
+        run_id: str,
+    ) -> list[CuratedRecommendation]:
+        return [
+            recommendation.model_copy(
+                update={
+                    "neighborhood_context": enriched.neighborhood_context,
+                    "event": recommendation.event.model_copy(
+                        update={
+                            "neighborhood_context": enriched.neighborhood_context,
+                            "neighborhood_confidence": enriched.neighborhood_confidence,
+                        }
+                    ),
+                }
+            )
+            for recommendation in recommendations
+        ]
+
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.neighborhood_scout.enrich_curated_neighborhoods",
+        AsyncMock(side_effect=_mock_enrich_curated_neighborhoods),
+    )
     monkeypatch.setattr(
         "scene_scout.orchestrator.CacheService",
         lambda run_id, db_path=None: CacheService(run_id=run_id, db_path=cache_db),

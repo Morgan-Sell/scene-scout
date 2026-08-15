@@ -23,6 +23,7 @@ from scene_scout.agents import (
     event_extraction,
     event_normalization,
     feed_scout,
+    neighborhood_scout,
     ranking,
     recommendation_curator,
     sellout_risk,
@@ -1163,7 +1164,11 @@ class Orchestrator:
             profile,
             run_id,
         )
-        curated = curator_result.recommendations
+        curated = await neighborhood_scout.enrich_curated_neighborhoods(
+            curator_result.recommendations,
+            cache=cache,
+            run_id=run_id,
+        )
         result.curated_recommendations = len(curated)
 
         email_result = await email_composer.run(
