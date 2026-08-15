@@ -554,17 +554,21 @@ distribution logged per run.
 ### 5.5 — Neighborhood Scout Prompt and Agent
 **Files:** `scene_scout/prompts/neighborhood_scout.txt`,
 `scene_scout/agents/neighborhood_scout.py`
-**Done when:** Agent geocodes each venue (Mode A) or falls back to Mode B. POI list
-passed to LLM as structured context — LLM does not recall businesses. Checks
-`venue_cache` first. On `neighborhood_confidence < 0.5`: context set to `None`.
-On geocoding failure: Mode B fallback, logged as warning.
+**Done when:** Agent geocodes each venue (Mode A) or falls back to Mode B when invoked on
+**curated recommendations** via `enrich_curated_neighborhoods()` (post-curator, deduped by
+venue — see Phase 5.8). POI list passed to LLM as structured context — LLM does not recall
+businesses. Checks `venue_cache` first. On `neighborhood_confidence < 0.5`: context set to
+`None`. On geocoding failure: Mode B fallback, logged as warning. Phase 1 batch does
+**not** include Neighborhood Scout.
 
 ### 5.6 — Batch Orchestration in Pipeline
 **Files:** `scene_scout/orchestrator.py` (extend)
-**Done when:** Phase 1 submits a single batch job covering all three enrichment agents
-for all filtered events. `PipelineState` written to `vol-pipeline-state` with `batch_id`.
-Orchestrator polls every 5 minutes via `asyncio.sleep()`. Phase 2 reads `PipelineState`
-and applies batch results. `vol-pipeline-state` cleared on successful completion.
+**Done when:** Phase 1 submits a single batch job covering **Talent Scout and Vibe
+Classifier** for all filtered events (Neighborhood Scout deferred to post-curator per
+Phase 5.8). `PipelineState` written to `vol-pipeline-state` with `batch_id`. Orchestrator
+polls every 5 minutes via `asyncio.sleep()`. Phase 2 reads `PipelineState`, applies batch
+results, ranks, curates, then runs `enrich_curated_neighborhoods()` before email.
+`vol-pipeline-state` cleared on successful completion.
 
 ### 5.7 — Enrichment Tests
 **Files:** `tests/agents/test_talent_scout.py`, `tests/agents/test_vibe_classifier.py`,
@@ -579,7 +583,8 @@ per enrichment agent.
 **Supplemental plan:** [`deferred_neighborhood_enrichment_plan.md`](deferred_neighborhood_enrichment_plan.md)
 **Done when:** Geocoding and Neighborhood Scout LLM run only for curated recommendations
 (post-curator), not all filtered events. Phase 1 batch covers Talent + Vibe only.
-Subphases A–E in the supplemental doc are complete; architecture diagram updated.
+Subphases A–E in the supplemental doc are complete; architecture and diagrams updated;
+structured logs expose post-curator neighborhood counters for operator visibility.
 
 ---
 

@@ -18,15 +18,13 @@ flowchart TD
 
     A4 --> A5["5. Description Quality\nout: NormalizedEvent list\n  description_quality_score float\n  low_information bool"]
 
-    A5 --> GEO["Nominatim Geocoding\nout: venue_coordinates lat/lon\n  poi_list within 1km"]
-
-    GEO --> FILTER["Pre-Enrichment Filter\nenrichment candidates only"]
+    A5 --> FILTER["Pre-Enrichment Filter\nenrichment candidates only"]
 
     FILTER -->|"low_information discard\noutside week discard\n2-week window discard"| DISCARD["discarded events"]
 
-    FILTER -->|"enrichment cache hit skip LLM\ncache miss → batch"| BATCH["BatchStrategy\nAnthropicBatch or ConcurrentAsync\nsingle submission per run"]
+    FILTER -->|"Talent + Vibe only\ncache miss → batch"| BATCH["BatchStrategy\nAnthropicBatch or ConcurrentAsync\nsingle submission per run"]
 
-    BATCH --> A6["EnrichedEvent\n  performers PerformerInfo list\n  top_performer_affinity float\n  vibe_tags 2-5 strings\n  neighborhood_context optional\n  neighborhood_confidence float\n  venue_coordinates optional"]
+    BATCH --> A6["EnrichedEvent\n  performers PerformerInfo list\n  top_performer_affinity float\n  vibe_tags 2-5 strings\n  neighborhood fields empty pre-rank"]
 
     PROF["UserProfile\n  name, email\n  category_weights map\n  vibe_preferences list\n  excluded_categories list"] --> A7
 
@@ -38,9 +36,11 @@ flowchart TD
 
     HIST["Recommendation History vol-history\nrecency penalties applied"] --> A9
 
-    A8 --> A9["8. Recommendation Curator Allegra\nout: CuratedRecommendation max 10\n  rank int\n  explanation string intact\n  neighborhood_context optional\n  sellout_urgency_note optional\n  feedback_token UUID\n  is_wildcard bool"]
+    A8 --> A9["8. Recommendation Curator Allegra\nout: CuratedRecommendation max 10\n  rank int\n  explanation string intact\n  sellout_urgency_note optional\n  feedback_token UUID\n  is_wildcard bool"]
 
-    A9 --> A10["9. Email Composer\nout: HTML email via Resend\n  tracking links per recommendation\n    /track token click redirect\n    /feedback token negative signal\n  UAT subject prefix with run_id"]
+    A9 --> NS["9. Neighborhood Scout\ngeocode + LLM on curated picks\n  dedupe by venue\n  neighborhood_context optional"]
+
+    NS --> A10["10. Email Composer\nout: HTML email via Resend\n  tracking links per recommendation\n    /track token click redirect\n    /feedback token negative signal\n  UAT subject prefix with run_id"]
 
     A10 --> EMAIL["User Email USER_EMAIL Modal Secret"]
 
@@ -56,4 +56,4 @@ flowchart TD
     UPA --> PROF
     UPA --> CHROMA
 
-    A10 --> EVAL["10. Evaluation Agent\nout: quality report\n  overall_quality float\n  flagged_recommendations\n  list_level_issues"]
+    A10 --> EVAL["11. Evaluation Agent\nout: quality report\n  overall_quality float\n  flagged_recommendations\n  list_level_issues"]

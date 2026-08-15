@@ -19,14 +19,12 @@ flowchart TD
             NO["Event Normalization\ndeterministic"]
             DD["Deduplication\nexact → fuzzy → LLM"]
             DQ["Description Quality\nrubric, no LLM"]
-            GEO["Geocoding\nNominatim"]
             FI["Pre-Enrichment Filter"]
         end
 
         subgraph BATCH["Batch Enrichment — BatchStrategy"]
             TS["Talent Scout\nperformer affinity"]
             VC["Vibe Classifier\natmosphere tags"]
-            NS["Neighborhood Scout\nhyper-local 1km"]
         end
 
         subgraph PHASE2["Phase 2 — Rank and Send"]
@@ -34,6 +32,8 @@ flowchart TD
             RK["Ranking Agent\ndeterministic scoring\nLiteLLM explanations"]
             SO["Sell-Out Risk\nheuristic classifier"]
             CU["Recommendation Curator\nAllegra"]
+            GEO["Geocoding\nNominatim post-curator"]
+            NS["Neighborhood Scout\nhyper-local 1km\ndeduped venues"]
             EC["Email Composer\nLiteLLM + Resend"]
         end
 
@@ -65,11 +65,10 @@ flowchart TD
 
     MODAL --> ORCH
     ORCH --> PHASE1
-    FS --> EX --> NO --> DD --> DQ --> GEO --> FI
+    FS --> EX --> NO --> DD --> DQ --> FI
     FS -.->|seen_entries| CS
     CS -.-> VCA
     FI -->|cache check| CS
-    GEO -.->|venue cache| CS
     FI -->|submit batch| BS
     BS --> BATCH
     BATCH -.->|write| VCA
@@ -77,9 +76,12 @@ flowchart TD
     BATCH -->|apply results| PHASE2
     VP --> RK
     VC2 --> RK
-    RK --> SO --> CU
+    RK --> SO --> CU --> NS
+    NS --> GEO
+    GEO -.->|venue cache| CS
+    NS -.->|inline batch| BS
+    NS --> EC
     HS <--> CU
-    CU --> EC
     EC -->|Resend| USER(("User\nUSER_EMAIL"))
 
     USER -->|event link| TR
@@ -99,6 +101,7 @@ flowchart TD
     LLM -.->|used by| EX
     LLM -.->|used by| BATCH
     LLM -.->|used by| RK
+    LLM -.->|used by| NS
     LLM -.->|used by| EC
     LLM -.->|used by| UP
     LLM -.->|used by| EV
