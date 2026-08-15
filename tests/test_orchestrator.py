@@ -1343,12 +1343,6 @@ async def test_orchestrator_post_curator_geocode_bounded_by_curated_size(
         assert geocode_calls == []
         return await original_collect(*args, **kwargs)
 
-    batch_request = BatchRequest(
-        custom_id="vibe_classifier:sandlot-game-1993",
-        prompt="Classify the sandlot vibe.",
-        system="Return JSON.",
-        agent_name="vibe_classifier",
-    )
     completed_batch = BatchResults(
         batch_id="batch-sandlot-1993",
         status="completed",
