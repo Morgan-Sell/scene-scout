@@ -9,6 +9,7 @@ and verifies SQLite history/feedback stores plus the Chroma liked-events index.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -32,6 +33,7 @@ from scene_scout.models.user import UserProfile
 from scene_scout.orchestrator import (
     Orchestrator,
     PreEnrichmentFilterResult,
+    _collect_enrichment_batch_requests,
 )
 from scene_scout.services import chroma as chroma_service
 from scene_scout.services.batch import BatchRequest, BatchResultItem, BatchResults
@@ -49,6 +51,19 @@ REFERENCE_NOW = datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)
 JAZZ_EVENT_ID = "sandlot-jazz-feedback-loop"
 REDIRECT_URL = "https://example.com/jazz-night"
 JAZZ_VECTOR = [1.0, 0.0, 0.0]
+NEIGHBORHOOD_CONTEXT_JSON = (
+    '{"neighborhood_context": "Walkable from the sandlot.", '
+    '"neighborhood_confidence": 0.82}'
+)
+
+
+@dataclass
+class FeedbackPipelineRun:
+    """Artifacts from a trimmed feedback-loop pipeline run."""
+
+    curator_result: CuratorResult
+    geocode_calls: list[tuple[str, str]]
+    email_recommendations: list[CuratedRecommendation]
 
 
 @pytest.fixture
@@ -188,18 +203,75 @@ async def _run_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     cache_db: Path,
     profile: UserProfile,
-) -> CuratorResult:
+) -> FeedbackPipelineRun:
     normalized = _normalized_jazz_event()
     enriched = _enriched_jazz_event(normalized)
     captured: list[CuratorResult] = []
+    geocode_calls: list[tuple[str, str]] = []
+    email_recommendations: list[CuratedRecommendation] = []
     from scene_scout.agents import recommendation_curator
 
     original_curator_run = recommendation_curator.run
+    original_collect = _collect_enrichment_batch_requests
 
     async def capture_curator(*args: object, **kwargs: object) -> CuratorResult:
         result = await original_curator_run(*args, **kwargs)
         captured.append(result)
         return result
+
+    async def collect_without_geocoding(
+        filtered: list[NormalizedEvent],
+        *,
+        cache: CacheService,
+        stated_interests: list[str] | None,
+        run_id: str,
+    ) -> list[BatchRequest]:
+        assert geocode_calls == []
+        return await original_collect(
+            filtered,
+            cache=cache,
+            stated_interests=stated_interests,
+            run_id=run_id,
+        )
+
+    async def counting_geocode(
+        venue: str,
+        city: str,
+        **kwargs: object,
+    ) -> tuple[float, float]:
+        geocode_calls.append((venue, city))
+        return (40.7128, -74.0060)
+
+    mock_neighborhood_strategy = AsyncMock()
+    mock_neighborhood_strategy.submit = AsyncMock(
+        return_value="batch-feedback-neighborhood"
+    )
+    mock_neighborhood_strategy.poll = AsyncMock(
+        return_value=BatchResults(
+            batch_id="batch-feedback-neighborhood",
+            status="completed",
+            results=[
+                BatchResultItem(
+                    custom_id=JAZZ_EVENT_ID,
+                    content=NEIGHBORHOOD_CONTEXT_JSON,
+                    success=True,
+                )
+            ],
+        )
+    )
+
+    async def capture_email(
+        recs: list[CuratedRecommendation],
+        *args: object,
+        **kwargs: object,
+    ) -> EmailComposerResult:
+        email_recommendations.extend(recs)
+        return EmailComposerResult(
+            html="<html><body>Allegra</body></html>",
+            subject="[UAT] Allegra",
+            preview_path=None,
+            sent=False,
+        )
 
     monkeypatch.setattr(
         "scene_scout.orchestrator.feed_scout.run",
@@ -230,16 +302,7 @@ async def _run_pipeline(
     )
     monkeypatch.setattr(
         "scene_scout.orchestrator._collect_enrichment_batch_requests",
-        AsyncMock(
-            return_value=[
-                BatchRequest(
-                    custom_id=f"vibe_classifier:{normalized.id}",
-                    prompt="Classify vibes.",
-                    system="Return JSON.",
-                    agent_name="vibe_classifier",
-                )
-            ]
-        ),
+        collect_without_geocoding,
     )
     monkeypatch.setattr(
         "scene_scout.orchestrator._poll_enrichment_batch",
@@ -273,46 +336,13 @@ async def _run_pipeline(
         "scene_scout.orchestrator.recommendation_curator.run",
         capture_curator,
     )
-
-    async def _mock_enrich_curated_neighborhoods(
-        recommendations: list[CuratedRecommendation],
-        *,
-        cache: CacheService,
-        run_id: str,
-    ) -> list[CuratedRecommendation]:
-        return [
-            recommendation.model_copy(
-                update={
-                    "neighborhood_context": enriched.neighborhood_context,
-                    "event": recommendation.event.model_copy(
-                        update={
-                            "neighborhood_context": enriched.neighborhood_context,
-                            "neighborhood_confidence": enriched.neighborhood_confidence,
-                        }
-                    ),
-                }
-            )
-            for recommendation in recommendations
-        ]
-
-    monkeypatch.setattr(
-        "scene_scout.orchestrator.neighborhood_scout.enrich_curated_neighborhoods",
-        AsyncMock(side_effect=_mock_enrich_curated_neighborhoods),
-    )
     monkeypatch.setattr(
         "scene_scout.orchestrator.CacheService",
         lambda run_id, db_path=None: CacheService(run_id=run_id, db_path=cache_db),
     )
     monkeypatch.setattr(
         "scene_scout.orchestrator.email_composer.run",
-        AsyncMock(
-            return_value=EmailComposerResult(
-                html="<html><body>Allegra</body></html>",
-                subject="[UAT] Allegra",
-                preview_path=None,
-                sent=False,
-            )
-        ),
+        AsyncMock(side_effect=capture_email),
     )
     monkeypatch.setattr(
         "scene_scout.orchestrator.evaluation.run",
@@ -334,12 +364,34 @@ async def _run_pipeline(
         ),
     )
 
-    with patch("scene_scout.agents.ranking.complete", ranking_complete):
+    with (
+        patch("scene_scout.agents.ranking.complete", ranking_complete),
+        patch(
+            "scene_scout.agents.neighborhood_scout.geocode_venue",
+            AsyncMock(side_effect=counting_geocode),
+        ),
+        patch(
+            "scene_scout.agents.neighborhood_scout.get_nearby_pois",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "scene_scout.agents.neighborhood_scout.get_batch_strategy",
+            lambda: mock_neighborhood_strategy,
+        ),
+    ):
         pipeline_result = await Orchestrator().run(PIPELINE_PROMPT)
 
     assert pipeline_result.curated_recommendations >= 1
     assert captured, "Expected curator output to be captured during pipeline run"
-    return captured[-1]
+    assert len(geocode_calls) <= pipeline_result.curated_recommendations
+    assert len(geocode_calls) == 1
+    assert email_recommendations
+    assert email_recommendations[0].neighborhood_context == "Walkable from the sandlot."
+    return FeedbackPipelineRun(
+        curator_result=captured[-1],
+        geocode_calls=geocode_calls,
+        email_recommendations=email_recommendations,
+    )
 
 
 @pytest.mark.asyncio
@@ -355,7 +407,8 @@ async def test_feedback_loop_click_updates_profile_and_chroma(
     user_preference.write_profile(profile)
     cache_db = tmp_path / "cache.db"
 
-    curator_result = await _run_pipeline(monkeypatch, cache_db, profile)
+    pipeline_run = await _run_pipeline(monkeypatch, cache_db, profile)
+    curator_result = pipeline_run.curator_result
     write_recommendations(_history_records_from_curated(curator_result.recommendations))
 
     recommendation = curator_result.recommendations[0]
