@@ -1,6 +1,6 @@
 # SceneScout: Deferred Neighborhood Enrichment Plan
 
-**Status:** Planned (not yet implemented).
+**Status:** Implemented (Subphases A–E complete).
 
 This supplemental plan documents a refactoring to limit **Nominatim/Overpass geocoding**
 and **Neighborhood Scout LLM** calls to venues that appear in the final curated

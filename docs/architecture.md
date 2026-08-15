@@ -368,17 +368,25 @@ Phase 1 — Ingest and normalize:
   → Structured ingest bypass OR Extraction (unstructured entries only)
   → Normalization (horizon from UserProfile) → Deduplication → Description Quality
   → Pre-enrichment filter (same horizon as normalization)
-  → Geocode venues (Nominatim, cached)
-  → Submit enrichment batch (Talent Scout + Vibe + Neighborhood Scout)
+  → Submit enrichment batch (Talent Scout + Vibe Classifier only)
   → Write PipelineState to vol-pipeline-state
   → Poll every 5 minutes via asyncio.sleep()
 
 Phase 2 — Enrich, rank, and send:
   → Read PipelineState from vol-pipeline-state
-  → Apply batch results → EnrichedEvent[]
-  → Ranking → Sell-Out Risk → Curator → Email Composer → Send
+  → Apply batch results → EnrichedEvent[] (talent + vibe; neighborhood fields empty)
+  → Ranking → Sell-Out Risk → Curator
+  → Neighborhood Scout on curated picks (geocode + LLM; deduped by venue; inline batch)
+  → Email Composer → Send
   → Clear vol-pipeline-state on success
 ```
+
+**Post-curator neighborhood observability:** After curation, `enrich_curated_neighborhoods()`
+logs structured counters on each run — `neighborhood_geocode_calls`,
+`neighborhood_llm_calls`, `neighborhood_cache_hits`, `unique_venues`, and
+`recommendations` — so operators can confirm geocode volume is bounded by curated pick
+count (typically ≤10, often fewer unique venues). These fields appear in JSONL run logs
+and the web Dev tab.
 
 ### Secret Management
 
@@ -520,7 +528,7 @@ uv run python -m scene_scout.cli uat --prompt "..." --dry-run
 
 | Level | Content |
 |---|---|
-| `INFO` | Agent start/complete, entry counts, cache hit rates (ETag + seen_entries), send confirmation |
+| `INFO` | Agent start/complete, entry counts, cache hit rates (ETag + seen_entries), post-curator neighborhood counters (`neighborhood_geocode_calls`, `neighborhood_llm_calls`, `neighborhood_cache_hits`), send confirmation |
 | `WARNING` | Feed failures, UNCHANGED feeds summary, low-confidence enrichments, sub-10 candidates |
 | `ERROR` | Schema failures, API errors, send failures |
 | `DEBUG` | Per-record detail; `--verbose` flag only |
@@ -623,6 +631,11 @@ Applied as a confidence discount in Ranking, not a hard filter.
 ## Neighborhood Scout: Hyper-Local Architecture
 
 Strict **15–20 minute walking radius** (~1 km) from the venue.
+
+**Execution timing (Phase 5.8):** Geocoding and Neighborhood Scout LLM run **after
+curation** on final recommendations only (≤10 picks, deduped by venue). Phase 1 batch
+covers Talent Scout and Vibe Classifier; ranking uses normalized `event.neighborhood`, not
+`neighborhood_context`. See [`deferred_neighborhood_enrichment_plan.md`](deferred_neighborhood_enrichment_plan.md).
 
 **Mode A — Geocoding-assisted (primary):** Nominatim geocodes venue → `(lat, lon)` →
 POIs within ~1 km → passed as structured context to LLM. LLM narrates what it is given.
@@ -953,12 +966,13 @@ class EnrichedEvent(NormalizedEvent):
 
 | | |
 |---|---|
-| Inputs | `list[EnrichedEvent]`, `UserProfile`, `run_id: str` |
-| Outputs | `list[EnrichedEvent]` with `neighborhood_context` |
-| LLM | Yes — narrates geocoded POI data; via batch strategy |
+| Inputs | Post-curator: `list[CuratedRecommendation]` via `enrich_curated_neighborhoods()`; agent `run()` accepts `list[EnrichedEvent]` |
+| Outputs | Curated picks with `neighborhood_context`, `neighborhood_confidence`, `venue_coordinates` (top-level and on nested `event`) |
+| When | After Recommendation Curator, before Email Composer — not in Phase 1 batch |
+| LLM | Yes — narrates geocoded POI data; inline batch submit/poll on curated picks |
 | Log color | Magenta |
 | Cache | `venue_cache` table; geo TTL 90 days, context TTL 30 days |
-| Failure handling | Per-event: geocoding fail or confidence < 0.5 → `None`; log warning |
+| Failure handling | Per-venue: geocoding fail or confidence < 0.5 → `None`; log warning. Structured log emits `neighborhood_geocode_calls`, `neighborhood_llm_calls`, `neighborhood_cache_hits` |
 
 ---
 
