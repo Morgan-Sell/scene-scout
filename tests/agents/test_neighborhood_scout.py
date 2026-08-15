@@ -532,6 +532,52 @@ async def test_enrich_curated_neighborhoods_uses_cache_without_external_calls(
     assert enriched[1].event.neighborhood_context == "Classic suburban sandlot vibes."
 
 
+@pytest.mark.asyncio
+async def test_enrich_curated_neighborhoods_failure_yields_none_context(
+    cache: CacheService,
+) -> None:
+    recommendations = [_curated_recommendation(rank=1)]
+    mock_strategy = AsyncMock()
+    mock_strategy.submit = AsyncMock(return_value="batch-curated-failure")
+    mock_strategy.poll = AsyncMock(
+        return_value=BatchResults(
+            batch_id="batch-curated-failure",
+            status="completed",
+            results=[
+                BatchResultItem(
+                    custom_id=EVENT_ID,
+                    content=LOW_CONFIDENCE_JSON,
+                    success=True,
+                )
+            ],
+        )
+    )
+
+    with (
+        patch(
+            "scene_scout.agents.neighborhood_scout.geocode_venue",
+            AsyncMock(return_value=COORDINATES),
+        ),
+        patch(
+            "scene_scout.agents.neighborhood_scout.get_nearby_pois",
+            AsyncMock(return_value=POIS),
+        ),
+        patch(
+            "scene_scout.agents.neighborhood_scout.get_batch_strategy",
+            lambda: mock_strategy,
+        ),
+    ):
+        enriched = await neighborhood_scout.enrich_curated_neighborhoods(
+            recommendations,
+            cache=cache,
+            run_id=TEST_RUN_ID,
+        )
+
+    assert enriched[0].neighborhood_context is None
+    assert enriched[0].event.neighborhood_context is None
+    assert enriched[0].event.neighborhood_confidence == 0.35
+
+
 @pytest.mark.parametrize("fixture_name", GOLDEN_FIXTURE_NAMES)
 @pytest.mark.asyncio
 async def test_golden_fixture_neighborhood_scout(

@@ -15,7 +15,7 @@ import pytest
 from scene_scout.cache_config import SEEN_ENTRIES_TTL_DAYS
 from scene_scout.curator_config import load_curator_config
 from scene_scout.logging import get_logger
-from scene_scout.models.curated import CuratorResult
+from scene_scout.models.curated import CuratedRecommendation, CuratorResult
 from scene_scout.models.email import EmailComposerResult
 from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.evaluation import EvaluationReport
@@ -37,6 +37,7 @@ from scene_scout.orchestrator import (
     _batch_custom_id_map,
     _batch_results_for_agent,
     _cap_extraction_entries,
+    _collect_enrichment_batch_requests,
     _partition_entries_by_seen_cache,
     _partition_entries_for_structured_ingest,
     _poll_enrichment_batch,
@@ -52,6 +53,7 @@ from scene_scout.orchestrator import (
 from scene_scout.orchestrator_config import UatRunOptions
 from scene_scout.services.batch import BatchRequest, BatchResultItem, BatchResults
 from scene_scout.services.cache import CacheService
+from scene_scout.services.feedback import generate_feedback_token
 from tests.conftest import TEST_RUN_ID
 
 SANDLOT_PROMPT = (
@@ -207,6 +209,38 @@ def _normalized_event(**overrides: object) -> NormalizedEvent:
     }
     payload.update(overrides)
     return NormalizedEvent.model_validate(payload)
+
+
+def _score_breakdown() -> dict[str, float]:
+    return {
+        "category_fit": 0.8,
+        "vibe_fit": 0.7,
+        "semantic_similarity": 0.0,
+        "performer_affinity": 0.7,
+        "location": 1.0,
+        "novelty": 1.0,
+        "source_quality": 0.8,
+        "source_coverage": 0.33,
+        "description_quality": 0.9,
+    }
+
+
+def _curated_recommendation(
+    event: EnrichedEvent,
+    *,
+    rank: int = 1,
+) -> CuratedRecommendation:
+    return CuratedRecommendation(
+        rank=rank,
+        event=event,
+        score=0.85,
+        score_breakdown=_score_breakdown(),
+        explanation="Strong fit for your profile.",
+        sellout_risk="low",
+        feedback_token=generate_feedback_token(),
+        run_id=TEST_RUN_ID,
+        recommended_at=datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc),
+    )
 
 
 def _event_candidate(**overrides: object) -> EventCandidate:
@@ -1193,6 +1227,253 @@ async def test_orchestrator_calls_email_composer_and_records_preview(
     email_mock.assert_awaited_once()
     assert result.email_preview_path == "output/uat_test/email_preview.html"
     assert result.email_sent is False
+
+
+@pytest.mark.asyncio
+async def test_collect_enrichment_batch_requests_excludes_neighborhood_scout(
+    cache_db: Path,
+) -> None:
+    """Regression: Phase 1 batch must not schedule neighborhood_scout work."""
+    cache = CacheService(run_id=TEST_RUN_ID, db_path=cache_db)
+    filtered = [
+        _normalized_event(
+            id="sandlot-performer-night",
+            description="Featuring Yo-Yo Ma under the floodlights.",
+            categories=["Classical"],
+        ),
+        _normalized_event(
+            id="sandlot-open-mic",
+            venue="Rec Center Field",
+            description="Open mic and pickup baseball.",
+            categories=["Music"],
+        ),
+    ]
+
+    with patch(
+        "scene_scout.agents.neighborhood_scout.geocode_venue",
+        AsyncMock(),
+    ) as mock_geocode:
+        requests = await _collect_enrichment_batch_requests(
+            filtered,
+            cache=cache,
+            stated_interests=["baseball"],
+            run_id=TEST_RUN_ID,
+        )
+
+    mock_geocode.assert_not_called()
+    agent_names = {request.agent_name for request in requests}
+    assert "neighborhood_scout" not in agent_names
+    assert agent_names.issubset({"talent_scout", "vibe_classifier"})
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_invokes_enrich_curated_neighborhoods_after_curator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    curated_event = EnrichedEvent.from_normalized(_normalized_event())
+    curated = [_curated_recommendation(curated_event)]
+    enrich_mock = AsyncMock(return_value=curated)
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.neighborhood_scout.enrich_curated_neighborhoods",
+        enrich_mock,
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.recommendation_curator.run",
+        AsyncMock(
+            return_value=CuratorResult(
+                recommendations=curated,
+                below_minimum=True,
+                curator_config=load_curator_config(),
+            )
+        ),
+    )
+
+    await Orchestrator().run(SANDLOT_PROMPT)
+
+    enrich_mock.assert_awaited_once()
+    assert enrich_mock.await_args.args[0] == curated
+    assert enrich_mock.await_args.kwargs["run_id"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_post_curator_geocode_bounded_by_curated_size(
+    pipeline_state_dir: Path,
+    cache_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Geocode runs only post-curator and at most once per unique curated venue."""
+    future_start = datetime.now(timezone.utc) + timedelta(days=3)
+    filtered_event = _normalized_event(
+        start_datetime=future_start,
+        description_quality_score=0.8,
+        low_information=False,
+    )
+    event_same_venue_a = EnrichedEvent.from_normalized(
+        _normalized_event(id="sandlot-pick-a", title="Sunset Pickup")
+    )
+    event_same_venue_b = EnrichedEvent.from_normalized(
+        _normalized_event(id="sandlot-pick-b", title="Night Game")
+    )
+    event_other_venue = EnrichedEvent.from_normalized(
+        _normalized_event(
+            id="rec-center-show",
+            title="Rec Center Show",
+            venue="Rec Center Field",
+        )
+    )
+    curated = [
+        _curated_recommendation(event_same_venue_a, rank=1),
+        _curated_recommendation(event_same_venue_b, rank=2),
+        _curated_recommendation(event_other_venue, rank=3),
+    ]
+
+    geocode_calls: list[tuple[str, str]] = []
+
+    async def counting_geocode(
+        venue: str,
+        city: str,
+        **kwargs: object,
+    ) -> tuple[float, float]:
+        geocode_calls.append((venue, city))
+        return (34.0522, -118.2437)
+
+    original_collect = _collect_enrichment_batch_requests
+
+    async def collect_without_geocoding(*args: object, **kwargs: object) -> list:
+        assert geocode_calls == []
+        return await original_collect(*args, **kwargs)
+
+    batch_request = BatchRequest(
+        custom_id="vibe_classifier:sandlot-game-1993",
+        prompt="Classify the sandlot vibe.",
+        system="Return JSON.",
+        agent_name="vibe_classifier",
+    )
+    completed_batch = BatchResults(
+        batch_id="batch-sandlot-1993",
+        status="completed",
+        results=[
+            BatchResultItem(
+                custom_id="vibe_classifier:sandlot-game-1993",
+                content='{"vibe_tags": ["outdoor", "social"]}',
+                success=True,
+            )
+        ],
+    )
+    neighborhood_batch = BatchResults(
+        batch_id="batch-neighborhood-curated",
+        status="completed",
+        results=[
+            BatchResultItem(
+                custom_id=event_same_venue_a.id,
+                content=(
+                    '{"neighborhood_context": "Classic sandlot block.", '
+                    '"neighborhood_confidence": 0.82}'
+                ),
+                success=True,
+            ),
+            BatchResultItem(
+                custom_id=event_other_venue.id,
+                content=(
+                    '{"neighborhood_context": "Near the rec center.", '
+                    '"neighborhood_confidence": 0.8}'
+                ),
+                success=True,
+            ),
+        ],
+    )
+    mock_neighborhood_strategy = AsyncMock()
+    mock_neighborhood_strategy.submit = AsyncMock(
+        return_value="batch-neighborhood-curated"
+    )
+    mock_neighborhood_strategy.poll = AsyncMock(return_value=neighborhood_batch)
+
+    monkeypatch.setattr(
+        "scene_scout.orchestrator._collect_enrichment_batch_requests",
+        collect_without_geocoding,
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator._poll_enrichment_batch",
+        AsyncMock(return_value=completed_batch),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.get_batch_strategy",
+        lambda: type(
+            "Strategy",
+            (),
+            {"submit": AsyncMock(return_value="batch-sandlot-1993")},
+        )(),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator._apply_enrichment_batch",
+        AsyncMock(return_value=[EnrichedEvent.from_normalized(filtered_event)]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.deduplication.run",
+        AsyncMock(return_value=[filtered_event]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.description_quality.run",
+        AsyncMock(return_value=[filtered_event]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.apply_pre_enrichment_filter",
+        lambda events, run_id, **kwargs: PreEnrichmentFilterResult(
+            events=[filtered_event],
+            discards={
+                "low_information": 0,
+                "outside_coming_week": 0,
+                "in_exclude_window": 0,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.ranking.run",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.sellout_risk.run",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.recommendation_curator.run",
+        AsyncMock(
+            return_value=CuratorResult(
+                recommendations=curated,
+                below_minimum=True,
+                curator_config=load_curator_config(),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.CacheService",
+        lambda run_id, db_path=None: CacheService(run_id=run_id, db_path=cache_db),
+    )
+    email_mock = AsyncMock(return_value=_empty_email_result(TEST_RUN_ID))
+    monkeypatch.setattr("scene_scout.orchestrator.email_composer.run", email_mock)
+
+    with (
+        patch(
+            "scene_scout.agents.neighborhood_scout.geocode_venue",
+            AsyncMock(side_effect=counting_geocode),
+        ),
+        patch(
+            "scene_scout.agents.neighborhood_scout.get_nearby_pois",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "scene_scout.agents.neighborhood_scout.get_batch_strategy",
+            lambda: mock_neighborhood_strategy,
+        ),
+    ):
+        result = await Orchestrator().run(SANDLOT_PROMPT)
+
+    assert result.curated_recommendations == len(curated)
+    assert len(geocode_calls) <= len(curated)
+    assert len(geocode_calls) == 2
+    email_recommendations = email_mock.await_args.args[0]
+    assert email_recommendations[0].neighborhood_context == "Classic sandlot block."
+    assert email_recommendations[1].neighborhood_context == "Classic sandlot block."
 
 
 def test_cap_extraction_entries_returns_all_when_under_cap() -> None:
