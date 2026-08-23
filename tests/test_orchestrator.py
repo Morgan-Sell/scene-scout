@@ -54,6 +54,7 @@ from scene_scout.orchestrator_config import UatRunOptions
 from scene_scout.services.batch import BatchRequest, BatchResultItem, BatchResults
 from scene_scout.services.cache import CacheService
 from scene_scout.services.feedback import generate_feedback_token
+from scene_scout.services.history import get_recent
 from tests.conftest import TEST_RUN_ID
 
 SANDLOT_PROMPT = (
@@ -1227,6 +1228,45 @@ async def test_orchestrator_calls_email_composer_and_records_preview(
     email_mock.assert_awaited_once()
     assert result.email_preview_path == "output/uat_test/email_preview.html"
     assert result.email_sent is False
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_writes_recommendation_history_after_email(
+    migrated_databases: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    curated_event = EnrichedEvent.from_normalized(_normalized_event())
+    curated = [_curated_recommendation(curated_event)]
+    enriched = [
+        curated[0].model_copy(
+            update={
+                "neighborhood_context": "Classic sandlot block.",
+                "recommended_at": datetime.now(timezone.utc),
+            },
+        )
+    ]
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.recommendation_curator.run",
+        AsyncMock(
+            return_value=CuratorResult(
+                recommendations=curated,
+                below_minimum=True,
+                curator_config=load_curator_config(),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "scene_scout.orchestrator.neighborhood_scout.enrich_curated_neighborhoods",
+        AsyncMock(return_value=enriched),
+    )
+
+    await Orchestrator().run(SANDLOT_PROMPT)
+
+    entries = get_recent(days=30)
+    assert len(entries) == 1
+    assert entries[0].feedback_token == enriched[0].feedback_token
+    assert entries[0].neighborhood_context == "Classic sandlot block."
+    assert entries[0].event_id == enriched[0].event.id
 
 
 @pytest.mark.asyncio

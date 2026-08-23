@@ -1182,6 +1182,12 @@ class Orchestrator:
             result.email_preview_path = str(email_result.preview_path)
         result.email_sent = email_result.sent
 
+        if curated:
+            history_service.write_recommendations(
+                history_service.records_from_curated(curated),
+                run_id=run_id,
+            )
+
         evaluation_report = await evaluation.run(curated, profile, run_id)
         result.evaluation_flags = len(evaluation_report.flagged_recommendations) + len(
             evaluation_report.list_level_issues

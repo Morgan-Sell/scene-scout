@@ -27,7 +27,6 @@ from scene_scout.models.enrichment import EnrichedEvent
 from scene_scout.models.evaluation import EvaluationReport
 from scene_scout.models.event import NormalizedEvent
 from scene_scout.models.feedback import FeedbackEvent
-from scene_scout.models.history import RecommendationRecord
 from scene_scout.models.ranking import RankingExplanationLLMOutput
 from scene_scout.models.user import UserProfile
 from scene_scout.orchestrator import (
@@ -38,7 +37,7 @@ from scene_scout.orchestrator import (
 from scene_scout.services import chroma as chroma_service
 from scene_scout.services.batch import BatchRequest, BatchResultItem, BatchResults
 from scene_scout.services.cache import CacheService
-from scene_scout.services.history import write_recommendations
+from scene_scout.services.history import get_recent
 from scene_scout.user_preference_config import FEEDBACK_CLICK_CATEGORY_DELTA
 from scene_scout.web.app import create_app
 from tests.conftest import TEST_RUN_ID
@@ -141,31 +140,6 @@ def _enriched_jazz_event(normalized: NormalizedEvent) -> EnrichedEvent:
             "top_performer_affinity": 0.6,
         }
     )
-
-
-def _history_records_from_curated(
-    recommendations: list[CuratedRecommendation],
-) -> list[RecommendationRecord]:
-    return [
-        RecommendationRecord(
-            feedback_token=rec.feedback_token,
-            event_id=rec.event.id,
-            run_id=rec.run_id,
-            rank=rec.rank,
-            score=rec.score,
-            score_breakdown=rec.score_breakdown,
-            event_title=rec.event.title,
-            categories=list(rec.event.categories),
-            explanation=rec.explanation,
-            neighborhood_context=rec.neighborhood_context,
-            sellout_risk=rec.sellout_risk,
-            sellout_urgency_note=rec.sellout_urgency_note,
-            is_wildcard=rec.is_wildcard,
-            recommended_at=rec.recommended_at,
-            feedback_signal=None,
-        )
-        for rec in recommendations
-    ]
 
 
 def _feedback_events_from_db() -> list[FeedbackEvent]:
@@ -408,10 +382,17 @@ async def test_feedback_loop_click_updates_profile_and_chroma(
     cache_db = tmp_path / "cache.db"
 
     pipeline_run = await _run_pipeline(monkeypatch, cache_db, profile)
-    curator_result = pipeline_run.curator_result
-    write_recommendations(_history_records_from_curated(curator_result.recommendations))
+    recommendation = pipeline_run.email_recommendations[0]
+    assert recommendation.neighborhood_context == "Walkable from the sandlot."
 
-    recommendation = curator_result.recommendations[0]
+    history_entries = get_recent(days=30)
+    assert len(history_entries) >= 1
+    history_entry = next(
+        entry
+        for entry in history_entries
+        if entry.feedback_token == recommendation.feedback_token
+    )
+    assert history_entry.neighborhood_context == "Walkable from the sandlot."
     assert recommendation.event.categories == ["Jazz"]
 
     response = tracking_client.get(
