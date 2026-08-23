@@ -17,6 +17,9 @@ from scene_scout.history_config import (
     SOFT_RECENCY_DAYS,
     SOFT_RECENCY_SCORE_MULTIPLIER,
 )
+from scene_scout.models.curated import CuratedRecommendation
+from scene_scout.models.enrichment import EnrichedEvent
+from scene_scout.models.event import NormalizedEvent
 from scene_scout.models.history import RecommendationRecord
 from scene_scout.services.feedback import generate_feedback_token
 from scene_scout.services.history import (
@@ -29,6 +32,7 @@ from scene_scout.services.history import (
     get_last_recommended_at,
     get_recent,
     get_soft_recency_event_ids,
+    records_from_curated,
     update_feedback,
     write_recommendations,
 )
@@ -75,6 +79,65 @@ def test_recommendation_record_validates() -> None:
 def test_recommendation_record_rejects_invalid_score() -> None:
     with pytest.raises(ValidationError, match="score"):
         _record(score=1.5)
+
+
+def _curated_recommendation(**overrides: object) -> CuratedRecommendation:
+    normalized = NormalizedEvent.model_validate(
+        {
+            "id": "sandlot-classic",
+            "title": "Pickle the Beast Day",
+            "start_datetime": datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc),
+            "venue": "The Sandlot",
+            "city": "Los Angeles",
+            "url": "https://example.com/sandlot-classic",
+            "is_free": True,
+            "description": "Perfect nostalgia pick for a summer afternoon.",
+            "categories": ["family", "baseball"],
+            "source_feeds": ["sandlot-pickup-league"],
+            "best_source_feed": "sandlot-pickup-league",
+            "run_id": TEST_RUN_ID,
+            "normalized_at": NOW,
+        }
+    )
+    payload = {
+        "rank": 1,
+        "event": EnrichedEvent.from_normalized(normalized),
+        "score": 0.85,
+        "score_breakdown": {
+            "category_fit": 0.9,
+            "vibe_fit": 0.7,
+            "semantic_similarity": 0.0,
+            "performer_affinity": 0.7,
+            "location": 1.0,
+            "novelty": 0.7,
+            "source_quality": 0.8,
+            "source_coverage": 0.33,
+            "description_quality": 0.9,
+        },
+        "explanation": "Perfect nostalgia pick for a summer afternoon.",
+        "neighborhood_context": "Glendale-adjacent backyard vibes.",
+        "sellout_risk": "low",
+        "feedback_token": generate_feedback_token(),
+        "run_id": TEST_RUN_ID,
+        "recommended_at": RECENT_AT,
+    }
+    payload.update(overrides)
+    return CuratedRecommendation.model_validate(payload)
+
+
+def test_records_from_curated_maps_enriched_fields() -> None:
+    curated = _curated_recommendation(is_wildcard=True)
+    records = records_from_curated([curated])
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.feedback_token == curated.feedback_token
+    assert record.event_id == curated.event.id
+    assert record.event_title == curated.event.title
+    assert record.categories == list(curated.event.categories)
+    assert record.neighborhood_context == "Glendale-adjacent backyard vibes."
+    assert record.is_wildcard is True
+    assert record.feedback_signal is None
 
 
 def test_write_recommendations_persists_rows(migrated_databases: tuple) -> None:

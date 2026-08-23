@@ -22,6 +22,7 @@ from scene_scout.history_config import (
     SOFT_RECENCY_SCORE_MULTIPLIER,
 )
 from scene_scout.logging import get_logger
+from scene_scout.models.curated import CuratedRecommendation
 from scene_scout.models.feedback import FeedbackSignal
 from scene_scout.models.history import RecommendationHistoryEntry, RecommendationRecord
 
@@ -79,6 +80,32 @@ def _row_to_entry(row: object) -> RecommendationHistoryEntry:
         recommended_at=_parse_dt(mapping["recommended_at"]),
         feedback_signal=mapping["feedback_signal"],
     )
+
+
+def records_from_curated(
+    recommendations: list[CuratedRecommendation],
+) -> list[RecommendationRecord]:
+    """Map enriched curated recommendations to history row payloads."""
+    return [
+        RecommendationRecord(
+            feedback_token=rec.feedback_token,
+            event_id=rec.event.id,
+            run_id=rec.run_id,
+            rank=rec.rank,
+            score=rec.score,
+            score_breakdown=rec.score_breakdown,
+            event_title=rec.event.title,
+            categories=list(rec.event.categories),
+            explanation=rec.explanation,
+            neighborhood_context=rec.neighborhood_context,
+            sellout_risk=rec.sellout_risk,
+            sellout_urgency_note=rec.sellout_urgency_note,
+            is_wildcard=rec.is_wildcard,
+            recommended_at=rec.recommended_at,
+            feedback_signal=None,
+        )
+        for rec in recommendations
+    ]
 
 
 def _record_values(record: RecommendationRecord) -> dict[str, object]:

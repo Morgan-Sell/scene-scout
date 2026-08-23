@@ -867,6 +867,14 @@ present in the preview HTML.
 
 Architecture rule: **if the email did not arrive, the live UAT did not pass.**
 
+### 7.8 — Persist Recommendation History
+**Files:** `scene_scout/orchestrator.py`, `scene_scout/services/history.py`
+**Done when:** After email compose (including dry-run UAT), the orchestrator calls
+`history.write_recommendations()` with enriched curated picks mapped via
+`records_from_curated()`. Rows land in `vol-history/history.db` with
+`neighborhood_context` and `feedback_token` so Phase 8 tracking and curator
+hard-exclude reads work on subsequent runs.
+
 ---
 
 ## Phase 8 — Feedback Loop
