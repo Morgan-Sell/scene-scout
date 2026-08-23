@@ -514,6 +514,10 @@ async def test_run_uat_writes_partial_summary_on_early_stop(
     output_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("UAT_HOME_CITY", raising=False)
+    monkeypatch.delenv("UAT_HORIZON_DAYS", raising=False)
+    monkeypatch.delenv("UAT_MAX_EXTRACTION", raising=False)
+
     partial = PipelineResult(
         run_id=TEST_RUN_ID,
         user_prompt=SANDLOT_PROMPT,
